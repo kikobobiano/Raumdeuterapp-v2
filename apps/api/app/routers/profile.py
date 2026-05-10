@@ -15,8 +15,9 @@ from app.core.config import (
 )
 from app.core.duckdb_pool import duckdb_session, fetch_all_dicts, list_seasons, list_views
 from app.core.filters import goalkeeper_only_sql, not_goalkeeper_sql
-from app.core.player_age import player_age_for_season
 from app.core.club_logos import normalize_club_logo, resolve_club_logo
+from app.core.player_age import player_age_for_season
+from app.core.player_traits import TRAIT_METRICS, select_player_traits
 from app.core.profile_percentiles import percentiles_for_cohort
 from app.core.sql_ident import q_ident
 from app.schemas import (
