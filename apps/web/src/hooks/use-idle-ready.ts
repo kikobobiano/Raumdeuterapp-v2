@@ -10,6 +10,8 @@ export function useIdleReady(enabled: boolean, idleTimeoutMs = 380): boolean {
   const [ready, setReady] = React.useState(false);
 
   React.useEffect(() => {
+    if (typeof window === "undefined") return;
+
     if (!enabled) {
       setReady(false);
       return;
@@ -17,8 +19,9 @@ export function useIdleReady(enabled: boolean, idleTimeoutMs = 380): boolean {
     setReady(false);
     let cancelled = false;
 
-    if (typeof window !== "undefined" && "requestIdleCallback" in window) {
-      const id = window.requestIdleCallback(
+    const w = window;
+    if ("requestIdleCallback" in w && typeof w.requestIdleCallback === "function") {
+      const id = w.requestIdleCallback(
         () => {
           if (!cancelled) setReady(true);
         },
@@ -26,16 +29,16 @@ export function useIdleReady(enabled: boolean, idleTimeoutMs = 380): boolean {
       );
       return () => {
         cancelled = true;
-        window.cancelIdleCallback(id);
+        w.cancelIdleCallback(id);
       };
     }
 
-    const t = window.setTimeout(() => {
+    const t = w.setTimeout(() => {
       if (!cancelled) setReady(true);
     }, idleTimeoutMs);
     return () => {
       cancelled = true;
-      window.clearTimeout(t);
+      w.clearTimeout(t);
     };
   }, [enabled, idleTimeoutMs]);
 

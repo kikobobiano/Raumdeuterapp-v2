@@ -13,9 +13,10 @@ from app.core.config import (
     position_tokens_merged,
     role_for_position,
 )
-from app.core.duckdb_pool import duckdb_session, fetch_all_dicts, list_seasons, list_views
+from app.core.duckdb_pool import duckdb_session, fetch_all_dicts, list_views
 from app.core.filters import goalkeeper_only_sql, not_goalkeeper_sql
-from app.core.club_logos import normalize_club_logo, resolve_club_logo
+from app.core.club_logos import club_logo_from_parquet_row, normalize_club_logo, resolve_club_logo
+from app.core.pi_history import build_pi_history_payload
 from app.core.player_age import player_age_for_season
 from app.core.player_traits import TRAIT_METRICS, select_player_traits
 from app.core.profile_percentiles import percentiles_for_cohort
@@ -136,35 +137,6 @@ def _player_image_url(rec: dict, conn=None) -> str | None:
     return None
 
 
-def _club_logo_from_rec(rec: dict) -> str | None:
-    """Per-row logo, only trustworthy when ``Team == club`` (no transfer).
-
-    Wyscout's ``Team logo`` is the crest of the row's ``Team`` (current team),
-    not of ``club`` (Team within selected timeframe). For transferred players
-    the two differ and the row's logo is wrong — fall back to the SQL/lookup
-    paths in :mod:`app.core.club_logos` instead.
-
-    Pre-aliased ``club_logo`` (already normalised by SQL) is always trusted.
-    """
-    pre_aliased = rec.get("club_logo")
-    v = normalize_club_logo(pre_aliased)
-    if v:
-        return v
-    team_val = rec.get("Team")
-    club_val = rec.get("club")
-    if (
-        isinstance(team_val, str)
-        and isinstance(club_val, str)
-        and team_val.strip() == club_val.strip()
-    ):
-        for key in ("Team logo", "Club logo"):
-            if key in rec:
-                v = normalize_club_logo(rec.get(key))
-                if v:
-                    return v
-    return None
-
-
 def _secondary_position_parts(rec: dict, cols: set[str]) -> list[str]:
     """Wyscout-style secondary / other position columns (non-empty strings only)."""
     keys = (
@@ -183,14 +155,6 @@ def _secondary_position_parts(rec: dict, cols: set[str]) -> list[str]:
     return out
 
 
-def _performance_index_from_rec(rec: dict) -> float | None:
-    raw = rec.get("performance_index")
-    if raw is None or (isinstance(raw, float) and raw != raw):
-        return None
-    try:
-        return float(raw)
-    except (TypeError, ValueError):
-        return None
 
 
 @router.get("/{wyscout_id}/performance-index-history", response_model=PerformanceIndexHistoryResponse)
@@ -203,46 +167,11 @@ def performance_index_history(
 
     One row per season: the club with most minutes (same default as profile).
     """
-    seasons_all = list_seasons()
-    if not seasons_all:
-        return PerformanceIndexHistoryResponse(points=[])
-
-    eligible = sorted([s for s in seasons_all if s <= season], reverse=True)[:limit]
-    eligible_chrono = list(reversed(eligible))
-    points: list[PerformanceIndexHistoryPoint] = []
-
     with duckdb_session() as conn:
-        for yr in eligible_chrono:
-            view = f"players_{yr}"
-            if view not in list_views():
-                continue
-            rows = fetch_all_dicts(
-                conn,
-                f'SELECT * FROM {view} WHERE "Wyscout id" = ? '
-                'ORDER BY "Minutes played" DESC NULLS LAST LIMIT 1',
-                [wyscout_id],
-            )
-            if not rows:
-                continue
-            rec = rows[0]
-            pi = _performance_index_from_rec(rec)
-            if pi is None:
-                continue
-            club = rec.get("club")
-            if club is not None and not isinstance(club, str):
-                club = str(club)
-            logo = resolve_club_logo(conn, club, yr) or _club_logo_from_rec(rec)
-            logo = normalize_club_logo(logo)
-            points.append(
-                PerformanceIndexHistoryPoint(
-                    season=yr,
-                    performance_index=float(pi),
-                    club=club if isinstance(club, str) else None,
-                    club_logo=logo,
-                )
-            )
-
-    return PerformanceIndexHistoryResponse(points=points)
+        payload = build_pi_history_payload(conn, wyscout_id, season, limit)
+        return PerformanceIndexHistoryResponse(
+            points=[PerformanceIndexHistoryPoint(**p) for p in payload],
+        )
 
 
 @router.get("/{wyscout_id}/profile", response_model=PlayerProfile)
@@ -258,6 +187,12 @@ def profile(
         description="Percentile cohort league; omit to use this player's league",
     ),
     min_minutes: int = Query(PROFILE_RADAR_MIN_MINUTES, ge=0),
+    performance_index_history_limit: int | None = Query(
+        None,
+        ge=1,
+        le=10,
+        description="When set, include up to N PI trajectory seasons inside this response.",
+    ),
 ) -> PlayerProfile:
     view = f"players_{season}"
     if view not in list_views():
@@ -482,6 +417,13 @@ def profile(
                     )
                 ]
 
+        pi_embed: list[PerformanceIndexHistoryPoint] | None = None
+        if performance_index_history_limit is not None:
+            raw_hist = build_pi_history_payload(
+                conn, wyscout_id, season, performance_index_history_limit
+            )
+            pi_embed = [PerformanceIndexHistoryPoint(**p) for p in raw_hist]
+
         return PlayerProfile(
             wyscout_id=intg("Wyscout id"),
             player=str(rec.get("Player") or ""),
@@ -489,7 +431,7 @@ def profile(
             club=rec.get("club"),
             league=rec.get("league"),
             club_logo=resolve_club_logo(conn, rec.get("club"), season)
-            or _club_logo_from_rec(rec),
+            or club_logo_from_parquet_row(rec),
             position=pos,
             age=player_age_for_season(rec, season),
             minutes=intg("Minutes played"),
@@ -518,4 +460,5 @@ def profile(
                 )
                 for r in stint_rows
             ],
+            performance_index_history=pi_embed,
         )

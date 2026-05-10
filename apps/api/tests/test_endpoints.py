@@ -119,6 +119,30 @@ def test_player_profile_smoke() -> None:
         d = r.json()
         assert d.get("wyscout_id") == wid
         assert "radar" in d and isinstance(d["radar"], list)
+        assert d.get("performance_index_history") is None
+
+
+def test_player_profile_embeds_pi_history() -> None:
+    with TestClient(app) as c:
+        seasons = c.get("/meta/seasons").json()
+        if not seasons:
+            return
+        rows = c.get(f"/players/search?season={seasons[0]}&q=salah&limit=1").json()
+        if not rows or rows[0].get("wyscout_id") is None:
+            return
+        wid = rows[0]["wyscout_id"]
+        r = c.get(
+            f"/players/{wid}/profile",
+            params={
+                "season": seasons[0],
+                "performance_index_history_limit": 5,
+            },
+        )
+        assert r.status_code == 200, r.text
+        d = r.json()
+        assert isinstance(d.get("performance_index_history"), list)
+        pts = d["performance_index_history"]
+        assert len(pts) <= 5
 
 
 def test_rankings_smoke() -> None:

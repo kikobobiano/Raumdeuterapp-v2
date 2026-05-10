@@ -28,6 +28,9 @@ import { scoutProfileIndexColor } from "@/lib/translation-band-color";
 import { DEFAULT_SEASON, useGlobalFilters } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
+/** Bundled PI trajectory rows (GET /profile?performance_index_history_limit=…). */
+const PROFILE_PI_HISTORY_EMBED = 5;
+
 function buildExportFilename(player: string | undefined | null, season: number): string {
   const base = player
     ? player.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")
@@ -88,33 +91,22 @@ export function ProfileDetailClient() {
     (!seasonsReadyNotEmpty || seasonProbablyValid);
 
   const profileQ = useQuery({
-    queryKey: ["profile", wyscoutId, season, urlClub],
+    queryKey: ["profile", wyscoutId, season, urlClub, PROFILE_PI_HISTORY_EMBED],
     queryFn: async () => {
       const { data, error, response } = await api.GET("/players/{wyscout_id}/profile", {
         params: {
           path: { wyscout_id: wyscoutId },
-          query: { season, club: urlClub ?? undefined },
+          query: {
+            season,
+            club: urlClub ?? undefined,
+            performance_index_history_limit: PROFILE_PI_HISTORY_EMBED,
+          },
         },
       });
       if (error) {
         const e = Object.assign(new Error(JSON.stringify(error)), { status: response.status });
         throw e;
       }
-      return data!;
-    },
-    enabled: profileQueriesEnabled,
-  });
-
-  const piHistoryQ = useQuery({
-    queryKey: ["performance-index-history", wyscoutId, season],
-    queryFn: async () => {
-      const { data, error } = await api.GET("/players/{wyscout_id}/performance-index-history", {
-        params: {
-          path: { wyscout_id: wyscoutId },
-          query: { season, limit: 5 },
-        },
-      });
-      if (error) throw new Error(JSON.stringify(error));
       return data!;
     },
     enabled: profileQueriesEnabled,
@@ -195,8 +187,8 @@ export function ProfileDetailClient() {
                 assists={p.assists ?? null}
                 imageUrl={p.player_image_url ?? null}
                 wyscoutId={p.wyscout_id ?? null}
-                piHistoryPoints={piHistoryQ.data?.points}
-                piHistoryLoading={piHistoryQ.isLoading}
+                piHistoryPoints={p.performance_index_history ?? undefined}
+                piHistoryLoading={profileQ.isPending}
               />
 
               {(p.clubs_in_season?.length ?? 0) > 1 && (
