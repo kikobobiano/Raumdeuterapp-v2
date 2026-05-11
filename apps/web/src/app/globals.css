@@ -1,0 +1,123 @@
+@import "tailwindcss";
+
+/*
+  Design tokens — sourced from
+  Downloads/stitch_premium_player_analytics_hub/elite_pitch_intelligence/DESIGN.md
+*/
+
+@theme {
+  /* surfaces — cool blue-grey */
+  --color-surface: #0a1018;
+  --color-surface-dim: #0a1018;
+  --color-surface-bright: #2e3540;
+  --color-surface-low: #121a26;
+  --color-surface-mid: #16202e;
+  --color-surface-high: #1f2a3a;
+  --color-surface-highest: #2a3445;
+  --color-on-surface: #d2e2f2;
+  --color-on-surface-variant: #b2c4d8;
+  --color-outline: #7e8fa5;
+  --color-outline-variant: #374557;
+
+  /* primary — tech blue */
+  --color-primary: #14d1ff;
+  --color-primary-fg: #003543;
+  --color-primary-container: #14d1ff;
+  --color-primary-soft: #a6e6ff;
+  --color-primary-deep: #004e60;
+
+  /* secondary — accent green (kept for positive trend deltas) */
+  --color-secondary: #00ff41;
+  --color-secondary-fg: #003907;
+  --color-secondary-soft: #72ff70;
+
+  /* accents */
+  --color-tertiary: #ffd5ae;
+  --color-tertiary-fg: #442b10;
+  --color-error: #ffb4ab;
+  --color-error-fg: #690005;
+
+  /* compare overlay palette — primary stays tech-blue; 2nd and 3rd players use pink + amber */
+  --color-compare-1: #14d1ff;
+  --color-compare-2: #ff4d9d;
+  --color-compare-3: #ffb800;
+
+  /* base */
+  --color-background: #0a1018;
+  --color-foreground: #d2e2f2;
+
+  /* radius */
+  --radius-sm: 0.125rem;
+  --radius-md: 0.375rem;
+  --radius-lg: 0.5rem;
+  --radius-xl: 0.75rem;
+
+  /* fonts (loaded via next/font as variables) */
+  --font-sans: var(--font-inter), system-ui, sans-serif;
+  --font-mono: var(--font-space-grotesk), ui-monospace, monospace;
+
+  /* container */
+  --spacing-container: 1440px;
+}
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  background: var(--color-background);
+  color: var(--color-foreground);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* utility helpers */
+@utility glass {
+  background: color-mix(in srgb, var(--color-surface-mid) 60%, transparent);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid color-mix(in srgb, white 10%, transparent);
+}
+
+@utility glow-primary {
+  box-shadow: 0 0 32px 0 color-mix(in srgb, var(--color-primary) 12%, transparent);
+}
+
+@utility label-caps {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  line-height: 1;
+  text-transform: uppercase;
+  color: var(--color-on-surface-variant);
+}
+
+@utility data-mono {
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1;
+}
+
+/* loading animations */
+@keyframes shimmerSweep {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes routeProgressPulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.6;
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "name": "raumdeuterappv2",
+  "private": true,
+  "version": "0.0.0",
+  "scripts": {
+    "dev": "pnpm --filter web dev",
+    "build": "pnpm --filter web build",
+    "lint": "pnpm --filter web lint",
+    "typecheck": "pnpm --filter web typecheck",
+    "openapi:gen": "pnpm --filter shared-types gen"
+  },
+  "packageManager": "pnpm@10.33.2"
+}

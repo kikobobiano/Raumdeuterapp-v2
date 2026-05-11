@@ -1,0 +1,23 @@
+services:
+  api:
+    build: ./apps/api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/data:ro
+      # Use host source so API code changes apply without rebuild (deps still from image)
+      - ./apps/api/app:/app/app:ro
+    environment:
+      RAUMDEUTER_DATA_DIR: /data
+      RAUMDEUTER_CORS_ORIGINS: '["http://localhost:3000"]'
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+    depends_on:
+      - api
