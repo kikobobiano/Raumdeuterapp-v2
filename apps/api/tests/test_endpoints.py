@@ -299,3 +299,29 @@ def test_screener_smoke() -> None:
         data = r.json()
         assert "rows" in data
         assert len(data["rows"]) <= 10
+
+
+def test_heatmap_smoke() -> None:
+    with TestClient(app) as c:
+        seasons = c.get("/meta/seasons").json()
+        if not seasons:
+            return
+        season = seasons[0]
+        rows = c.get(
+            f"/players/search?season={season}&q=salah&limit=1"
+        ).json()
+        if not rows or rows[0].get("wyscout_id") is None:
+            return
+        wid = rows[0]["wyscout_id"]
+        r = c.get(f"/players/{wid}/heatmap", params={"season": season})
+        # 404 is acceptable when the heatmaps parquet hasn't been generated yet
+        # (CI / fresh checkout). 200 must return a valid shape.
+        assert r.status_code in (200, 404), r.text
+        if r.status_code == 200:
+            d = r.json()
+            assert d["wyscout_id"] == wid
+            assert isinstance(d["points"], list)
+            assert "max_count" in d
+            assert "n_points" in d
+            for p in d["points"][:5]:
+                assert set(p.keys()) >= {"x", "y", "count"}
