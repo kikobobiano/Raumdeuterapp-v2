@@ -483,6 +483,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/players/{wyscout_id}/heatmap": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Heatmap */
+        get: operations["get_heatmap_players__wyscout_id__heatmap_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/health": {
         parameters: {
             query?: never;
@@ -743,6 +760,32 @@ export interface components {
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /** HeatmapPoint */
+        HeatmapPoint: {
+            /** X */
+            x: number;
+            /** Y */
+            y: number;
+            /** Count */
+            count: number;
+        };
+        /** HeatmapResponse */
+        HeatmapResponse: {
+            /** Wyscout Id */
+            wyscout_id: number;
+            /** Competition Id */
+            competition_id: number;
+            /** Competition */
+            competition: string;
+            /** Season */
+            season: number;
+            /** Points */
+            points: components["schemas"]["HeatmapPoint"][];
+            /** N Points */
+            n_points: number;
+            /** Max Count */
+            max_count: number;
         };
         /**
          * LeagueStyleFitRow
@@ -2373,6 +2416,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PotentialCohortResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_heatmap_players__wyscout_id__heatmap_get: {
+        parameters: {
+            query: {
+                season: number;
+                competition_id?: number | null;
+            };
+            header?: never;
+            path: {
+                wyscout_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HeatmapResponse"];
                 };
             };
             /** @description Validation Error */
