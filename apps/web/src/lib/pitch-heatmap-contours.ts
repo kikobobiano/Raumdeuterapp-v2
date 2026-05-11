@@ -14,9 +14,8 @@ const PITCH = { x: 2, y: 2, w: 96, h: 96 };
 const GAUSS_SIGMA = 2.25;
 const BAND_COUNT = 8;
 
-/** Theme primary scale (tokens in globals.css) — avoids runtime CSS reads. */
+/** Theme primary for heatmap contours (matches `--color-primary`). */
 const THEME_PRIMARY = { r: 20, g: 209, b: 255 };
-const THEME_ON_SURFACE = { r: 210, g: 226, b: 242 };
 
 export interface HeatmapContourPoint {
   x: number;
@@ -129,34 +128,4 @@ export function buildHeatmapContourBands(heatmap: HeatmapContourInput | null): C
       return { d: pathD, fill, value: level.value };
     })
     .filter((b) => b.d.length > 0);
-}
-
-export interface ScatterDot {
-  cx: number;
-  cy: number;
-  r: number;
-  opacity: number;
-}
-
-/** Scatter marks for raw Wyscout heat cells (above contour fill, below role zones). */
-export function buildHeatmapScatterDots(heatmap: HeatmapContourInput | null): ScatterDot[] {
-  if (!heatmap?.points.length || heatmap.maxCount <= 0) return [];
-  const max = heatmap.maxCount;
-  return heatmap.points.map((p) => {
-    const { sx, sy } = wyscoutToNormalizedPitch(p);
-    const cx = PITCH.x + (sx / 100) * PITCH.w;
-    const cy = PITCH.y + (sy / 100) * PITCH.h;
-    const ratio = Math.min(1, Math.max(0, p.count / max));
-    const r = 0.28 + Math.sqrt(ratio) * 0.85;
-    const opacity = 0.35 + ratio * 0.45;
-    return { cx, cy, r, opacity };
-  });
-}
-
-export function scatterDotStrokeRgb(): string {
-  return `rgb(${THEME_PRIMARY.r}, ${THEME_PRIMARY.g}, ${THEME_PRIMARY.b})`;
-}
-
-export function scatterDotFillRgb(): string {
-  return `rgba(${THEME_ON_SURFACE.r}, ${THEME_ON_SURFACE.g}, ${THEME_ON_SURFACE.b}, 0.22)`;
 }

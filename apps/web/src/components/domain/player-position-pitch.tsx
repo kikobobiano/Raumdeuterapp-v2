@@ -3,12 +3,7 @@
 import * as React from "react";
 
 import { cn } from "@/lib/utils";
-import {
-  buildHeatmapContourBands,
-  buildHeatmapScatterDots,
-  scatterDotFillRgb,
-  scatterDotStrokeRgb,
-} from "@/lib/pitch-heatmap-contours";
+import { buildHeatmapContourBands } from "@/lib/pitch-heatmap-contours";
 
 /** Zone anchors (viewBox 0–100); drawn inset so highlights stay compact */
 const ZONES: { tokens: string[]; x: number; y: number; w: number; h: number }[] = [
@@ -32,12 +27,11 @@ const ZONES: { tokens: string[]; x: number; y: number; w: number; h: number }[] 
 
 const PITCH_FILL = "#151e2c";
 const LINE = "rgba(255,255,255,0.08)";
-/** Primary position — stronger */
-const PRIMARY_FILL = "rgba(20, 209, 255, 0.34)";
-const PRIMARY_STROKE = "#14d1ff";
-/** Secondary positions — more transparent */
-const SECONDARY_FILL = "rgba(20, 209, 255, 0.1)";
-const SECONDARY_STROKE = "rgba(20, 209, 255, 0.38)";
+/** Position zones — same pink as `--color-compare-2` / Compare player 2 */
+const POSITION_PRIMARY_FILL = "rgba(255, 77, 157, 0.34)";
+const POSITION_PRIMARY_STROKE = "#ff4d9d";
+const POSITION_SECONDARY_FILL = "rgba(255, 77, 157, 0.1)";
+const POSITION_SECONDARY_STROKE = "rgba(255, 77, 157, 0.38)";
 
 function insetRect(
   z: { x: number; y: number; w: number; h: number },
@@ -111,14 +105,6 @@ export function PlayerPositionPitch({
     [heatmapModel],
   );
 
-  const scatterDots = React.useMemo(
-    () => buildHeatmapScatterDots(heatmapModel),
-    [heatmapModel],
-  );
-
-  const scatterFill = scatterDotFillRgb();
-  const scatterStroke = scatterDotStrokeRgb();
-
   return (
     <div className={cn("w-full", className)}>
       <svg
@@ -173,23 +159,6 @@ export function PlayerPositionPitch({
             </g>
           )}
 
-          {scatterDots.length > 0 && (
-            <g clipPath={`url(#pitch-clip-${heatmapId})`} pointerEvents="none">
-              {scatterDots.map((dot, i) => (
-                <circle
-                  key={`hm-s-${i}`}
-                  cx={dot.cx}
-                  cy={dot.cy}
-                  r={dot.r}
-                  fill={scatterFill}
-                  stroke={scatterStroke}
-                  strokeWidth={0.2}
-                  opacity={dot.opacity}
-                />
-              ))}
-            </g>
-          )}
-
           {ZONES.map((z, i) => {
             const kind = zoneKind(z, primary, secondary);
             if (kind !== "secondary") return null;
@@ -200,8 +169,8 @@ export function PlayerPositionPitch({
                 cx={c.cx}
                 cy={c.cy}
                 r={c.r}
-                fill={SECONDARY_FILL}
-                stroke={SECONDARY_STROKE}
+                fill={POSITION_SECONDARY_FILL}
+                stroke={POSITION_SECONDARY_STROKE}
                 strokeWidth={0.5}
               />
             );
@@ -216,8 +185,8 @@ export function PlayerPositionPitch({
                 cx={c.cx}
                 cy={c.cy}
                 r={c.r}
-                fill={PRIMARY_FILL}
-                stroke={PRIMARY_STROKE}
+                fill={POSITION_PRIMARY_FILL}
+                stroke={POSITION_PRIMARY_STROKE}
                 strokeWidth={0.72}
               />
             );
@@ -229,7 +198,9 @@ export function PlayerPositionPitch({
         <div className="mt-3 space-y-1.5 text-center text-xs">
           {primaryTokens.length > 0 && (
             <p className="text-on-surface">
-              <span className="font-mono text-[0.65rem] font-semibold tracking-wider text-primary">
+              <span
+                className="font-mono text-[0.65rem] font-semibold tracking-wider text-[color:var(--color-compare-2)]"
+              >
                 Primary
               </span>
               <span className="mx-2 text-on-surface-variant">·</span>
@@ -251,9 +222,7 @@ export function PlayerPositionPitch({
                 Heatmap
               </span>
               <span className="mx-2 opacity-50">·</span>
-              <span className="data-mono opacity-85">
-                {heatmap.points.length} zones
-              </span>
+              <span className="opacity-85">maiores zonas de ação</span>
             </p>
           )}
         </div>
