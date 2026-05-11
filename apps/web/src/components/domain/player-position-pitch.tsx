@@ -27,11 +27,12 @@ const ZONES: { tokens: string[]; x: number; y: number; w: number; h: number }[] 
 
 const PITCH_FILL = "#151e2c";
 const LINE = "rgba(255,255,255,0.08)";
-/** Position zones — same pink as `--color-compare-2` / Compare player 2 */
-const POSITION_PRIMARY_FILL = "rgba(255, 77, 157, 0.34)";
-const POSITION_PRIMARY_STROKE = "#ff4d9d";
-const POSITION_SECONDARY_FILL = "rgba(255, 77, 157, 0.1)";
-const POSITION_SECONDARY_STROKE = "rgba(255, 77, 157, 0.38)";
+/** Position dots — solid compare pink + dark halo so they read over cyan heatmap */
+const POSITION_RING = "#0a1018";
+const POSITION_PRIMARY_FILL = "#ff4d9d";
+const POSITION_PRIMARY_STROKE = POSITION_RING;
+const POSITION_SECONDARY_FILL = "#d9488f";
+const POSITION_SECONDARY_STROKE = POSITION_RING;
 
 function insetRect(
   z: { x: number; y: number; w: number; h: number },
@@ -171,7 +172,7 @@ export function PlayerPositionPitch({
                 r={c.r}
                 fill={POSITION_SECONDARY_FILL}
                 stroke={POSITION_SECONDARY_STROKE}
-                strokeWidth={0.5}
+                strokeWidth={0.62}
               />
             );
           })}
@@ -187,7 +188,7 @@ export function PlayerPositionPitch({
                 r={c.r}
                 fill={POSITION_PRIMARY_FILL}
                 stroke={POSITION_PRIMARY_STROKE}
-                strokeWidth={0.72}
+                strokeWidth={0.78}
               />
             );
           })}
