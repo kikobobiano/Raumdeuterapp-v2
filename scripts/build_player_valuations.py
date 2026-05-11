@@ -2,6 +2,10 @@
 
 Output columns: ``wyscout_id``, ``key_transfermarkt``, ``date``, ``market_value_in_eur``.
 
+For **parquet inference** (last TM valuation ≤ season reference date per Wyscout row),
+use :mod:`utils.tm_market_value` — it reads the full ``player_valuations.csv`` plus
+``people.csv`` and performs an as-of join (no filtered file required).
+
 The Wyscout export column ``Wyscout id`` usually matches **key_soccerway** in Reep
 ``people.csv`` more often than **key_wyscout**; the filter maps either id to
 ``key_transfermarkt`` (same idea as ``enrich_with_tm.py``).
