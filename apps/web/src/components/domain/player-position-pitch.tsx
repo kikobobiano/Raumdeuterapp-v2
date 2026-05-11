@@ -3,6 +3,12 @@
 import * as React from "react";
 
 import { cn } from "@/lib/utils";
+import {
+  buildHeatmapContourBands,
+  buildHeatmapScatterDots,
+  scatterDotFillRgb,
+  scatterDotStrokeRgb,
+} from "@/lib/pitch-heatmap-contours";
 
 /** Zone anchors (viewBox 0–100); drawn inset so highlights stay compact */
 const ZONES: { tokens: string[]; x: number; y: number; w: number; h: number }[] = [
@@ -94,22 +100,24 @@ export function PlayerPositionPitch({
   const hasAny = primaryTokens.length > 0 || secondaryTokens.length > 0;
 
   const heatmapId = React.useId();
-  const heatmapPoints = React.useMemo(() => {
-    if (!heatmap || !heatmap.points.length || heatmap.maxCount <= 0) return [];
-    const R_BASE = 0.5;
-    const R_SCALE = 2.3;
-    const max = heatmap.maxCount;
-    return heatmap.points.map((p) => {
-      const ratio = Math.min(1, Math.max(0, p.count / max));
-      const r = R_BASE + R_SCALE * Math.sqrt(ratio);
-      const opacity = 0.22 + 0.55 * ratio;
-      // Wyscout: x = pitch length (0 own → 100 opponent), y = pitch width.
-      // SVG: y axis is flipped (attacking up = small y).
-      const svgX = p.y;
-      const svgY = 100 - p.x;
-      return { svgX, svgY, r, opacity };
-    });
-  }, [heatmap]);
+  const heatmapModel = React.useMemo(
+    () =>
+      heatmap && heatmap.points.length > 0 && heatmap.maxCount > 0 ? heatmap : null,
+    [heatmap],
+  );
+
+  const contourBands = React.useMemo(
+    () => buildHeatmapContourBands(heatmapModel),
+    [heatmapModel],
+  );
+
+  const scatterDots = React.useMemo(
+    () => buildHeatmapScatterDots(heatmapModel),
+    [heatmapModel],
+  );
+
+  const scatterFill = scatterDotFillRgb();
+  const scatterStroke = scatterDotStrokeRgb();
 
   return (
     <div className={cn("w-full", className)}>
@@ -126,6 +134,9 @@ export function PlayerPositionPitch({
               <stop offset="45%" stopColor="transparent" />
               <stop offset="100%" stopColor="rgba(20,209,255,0.03)" />
             </linearGradient>
+            <clipPath id={`pitch-clip-${heatmapId}`}>
+              <rect x="2" y="2" width="96" height="96" rx="2" />
+            </clipPath>
           </defs>
 
           <rect
@@ -145,34 +156,38 @@ export function PlayerPositionPitch({
           <rect x="32" y="2" width="36" height="14" fill="none" stroke={LINE} strokeWidth="0.4" />
           <rect x="32" y="84" width="36" height="14" fill="none" stroke={LINE} strokeWidth="0.4" />
 
-          {heatmapPoints.length > 0 && (
-            <>
-              <defs>
-                <radialGradient id={`hm-${heatmapId}`} cx="50%" cy="50%" r="50%">
-                  <stop offset="0%" stopColor="#14d1ff" stopOpacity="0.95" />
-                  <stop offset="60%" stopColor="#14d1ff" stopOpacity="0.4" />
-                  <stop offset="100%" stopColor="#14d1ff" stopOpacity="0" />
-                </radialGradient>
-                <filter id={`hmblur-${heatmapId}`} x="-10%" y="-10%" width="120%" height="120%">
-                  <feGaussianBlur stdDeviation="0.6" />
-                </filter>
-              </defs>
-              <g
-                filter={`url(#hmblur-${heatmapId})`}
-                style={{ mixBlendMode: "screen" }}
-              >
-                {heatmapPoints.map((p, i) => (
-                  <circle
-                    key={`hm-${i}`}
-                    cx={p.svgX}
-                    cy={p.svgY}
-                    r={p.r}
-                    fill={`url(#hm-${heatmapId})`}
-                    opacity={p.opacity}
-                  />
-                ))}
-              </g>
-            </>
+          {contourBands.length > 0 && (
+            <g
+              clipPath={`url(#pitch-clip-${heatmapId})`}
+              style={{ mixBlendMode: "screen" }}
+              pointerEvents="none"
+            >
+              {contourBands.map((band, i) => (
+                <path
+                  key={`hm-c-${band.value}-${i}`}
+                  d={band.d}
+                  fill={band.fill}
+                  stroke="none"
+                />
+              ))}
+            </g>
+          )}
+
+          {scatterDots.length > 0 && (
+            <g clipPath={`url(#pitch-clip-${heatmapId})`} pointerEvents="none">
+              {scatterDots.map((dot, i) => (
+                <circle
+                  key={`hm-s-${i}`}
+                  cx={dot.cx}
+                  cy={dot.cy}
+                  r={dot.r}
+                  fill={scatterFill}
+                  stroke={scatterStroke}
+                  strokeWidth={0.2}
+                  opacity={dot.opacity}
+                />
+              ))}
+            </g>
           )}
 
           {ZONES.map((z, i) => {
