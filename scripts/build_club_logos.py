@@ -1,12 +1,16 @@
-"""Build a club_logos parquet: every (Team, Team logo) seen across all Wyscout CSVs.
+"""Build a club_logos parquet from Wyscout player CSVs under data/players/wyscout/.
 
-Output:
-  data/teams/club_logos.parquet  with columns: team, logo_url, n_seasons (count of files
-  the pair appeared in), latest_file (most recent CSV that contained it).
+Output (default ``data/teams/club_logos.parquet``) columns:
 
-The output is deduplicated by (team, logo_url). Teams with multiple logo URLs across
-seasons keep one row per distinct URL — caller can pick the most recent via
-``latest_file``.
+  - ``team`` — club name (Wyscout ``Team``)
+  - ``logo_url`` — crest URL (Wyscout ``Team logo``)
+  - ``competition`` — domestic competition name (Wyscout ``Competition``), same
+    string family as the ``league`` column in season parquets, so e.g. Barcelona
+    in La Liga does not share a row with Barcelona in another country.
+  - ``n_seasons`` — number of distinct source files the triple appeared in
+  - ``latest_file`` — lexicographically latest source filename (for ordering)
+
+Dedup key: ``(team, logo_url, competition)``.
 """
 from __future__ import annotations
 
@@ -49,14 +53,19 @@ def main() -> int:
     rows: list[dict] = []
     for f in files:
         try:
-            df = pd.read_csv(f, usecols=["Team", "Team logo"])
+            df = pd.read_csv(f, usecols=["Team", "Team logo", "Competition"])
         except (ValueError, KeyError):
-            continue
+            try:
+                df = pd.read_csv(f, usecols=["Team", "Team logo"])
+            except (ValueError, KeyError):
+                continue
+            df["Competition"] = ""
         df = df.dropna(subset=["Team"])
         df["Team"] = df["Team"].astype(str).str.strip()
         df["Team logo"] = df["Team logo"].astype(str).str.strip()
+        df["Competition"] = df["Competition"].fillna("").astype(str).str.strip()
         df = df[(df["Team"] != "") & (df["Team logo"] != "") & (df["Team logo"] != "nan")]
-        df = df.drop_duplicates(subset=["Team", "Team logo"])
+        df = df.drop_duplicates(subset=["Team", "Team logo", "Competition"])
         df["latest_file"] = f.name
         rows.append(df)
 
@@ -65,19 +74,26 @@ def main() -> int:
         return 3
 
     full = pd.concat(rows, ignore_index=True)
-    full = full.rename(columns={"Team": "team", "Team logo": "logo_url"})
+    full = full.rename(
+        columns={
+            "Team": "team",
+            "Team logo": "logo_url",
+            "Competition": "competition",
+        }
+    )
 
     grouped = (
-        full.groupby(["team", "logo_url"], as_index=False)
+        full.groupby(["team", "logo_url", "competition"], as_index=False)
         .agg(n_seasons=("latest_file", "nunique"), latest_file=("latest_file", "max"))
-        .sort_values(["team", "n_seasons"], ascending=[True, False])
+        .sort_values(["team", "competition", "n_seasons"], ascending=[True, True, False])
         .reset_index(drop=True)
     )
 
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     grouped.to_parquet(out_path, index=False, compression="snappy")
-    print(f"Wrote {out_path} ({len(grouped):,} rows; {grouped['team'].nunique():,} teams)")
+    n_teams = grouped["team"].nunique()
+    print(f"Wrote {out_path} ({len(grouped):,} rows; {n_teams:,} distinct team names)")
 
     if args.csv:
         csv_path = out_path.with_suffix(".csv")

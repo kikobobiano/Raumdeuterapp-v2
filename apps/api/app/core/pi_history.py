@@ -17,6 +17,7 @@ _WY_ID = "Wyscout id"
 
 _PI_HISTORY_PREF_COLS = (
     "club",
+    "league",
     "performance_index",
     "Minutes played",
     "club_logo",
@@ -82,7 +83,9 @@ def build_pi_history_payload(
         club = rec.get("club")
         if club is not None and not isinstance(club, str):
             club = str(club)
-        logo = resolve_club_logo(conn, club, yr) or club_logo_from_parquet_row(rec)
+        logo = (
+            resolve_club_logo(conn, club, yr, rec.get("league")) or club_logo_from_parquet_row(rec)
+        )
         logo = normalize_club_logo(logo)
         points.append(
             {

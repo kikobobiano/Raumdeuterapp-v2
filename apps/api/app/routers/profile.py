@@ -219,7 +219,7 @@ def profile(
         # All clubs the player has rows for in this season — UI can offer a switcher.
         stint_rows = fetch_all_dicts(
             conn,
-            f'SELECT club, "Minutes played" AS minutes FROM {view} '
+            f'SELECT club, league, "Minutes played" AS minutes FROM {view} '
             'WHERE "Wyscout id" = ? AND club IS NOT NULL '
             'ORDER BY "Minutes played" DESC NULLS LAST',
             [wyscout_id],
@@ -430,7 +430,7 @@ def profile(
             full_name=rec.get("Full name"),
             club=rec.get("club"),
             league=rec.get("league"),
-            club_logo=resolve_club_logo(conn, rec.get("club"), season)
+            club_logo=resolve_club_logo(conn, rec.get("club"), season, rec.get("league"))
             or club_logo_from_parquet_row(rec),
             position=pos,
             age=player_age_for_season(rec, season),
@@ -456,7 +456,7 @@ def profile(
                 ProfileClubStint(
                     club=str(r["club"]),
                     minutes=int(r["minutes"]) if r.get("minutes") is not None else None,
-                    club_logo=resolve_club_logo(conn, r["club"], season),
+                    club_logo=resolve_club_logo(conn, r["club"], season, r.get("league")),
                 )
                 for r in stint_rows
             ],

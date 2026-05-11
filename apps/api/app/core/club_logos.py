@@ -11,8 +11,11 @@ one belonging to ``club``. We resolve it via the same-season players view by
 matching ``Team = <this row's club>`` and grabbing that row's ``Team logo``.
 
 When a pre-built ``data/teams/club_logos.parquet`` is registered as the
-``teams_club_logos`` view it is preferred (broader cross-season coverage), but
-it is not required.
+``teams_club_logos`` view it is preferred (broader cross-season coverage). Rows
+should include ``competition`` (Wyscout domestic competition name) aligned with the
+player parquet ``league`` column so homonymous clubs resolve to the correct crest.
+Without a ``competition`` column on ``teams_club_logos``, lookup falls back to
+team name only (legacy parquet).
 """
 
 from __future__ import annotations
@@ -25,6 +28,7 @@ TEAMS_CLUB_LOGOS_VIEW = "teams_club_logos"
 _TEAM_LOGO_COL = "Team logo"
 _TEAM_COL = "Team"
 _CLUB_COL = "club"
+_LEAGUE_COL = "league"
 
 
 def season_csv_tag(season: int) -> str:
@@ -110,7 +114,7 @@ def _view_has_column(conn: duckdb.DuckDBPyConnection, view: str, column_name: st
     return False
 
 
-def _self_join_club_logo_sql(view: str, outer: str) -> str:
+def _self_join_club_logo_sql(conn: duckdb.DuckDBPyConnection, view: str, outer: str) -> str:
     """``... AS club_logo`` from the same-season players view, keyed on ``club``.
 
     ``outer`` is the alias (or table name) used to qualify the outer row's
@@ -120,24 +124,38 @@ def _self_join_club_logo_sql(view: str, outer: str) -> str:
       1. Row's own ``Team logo`` when ``Team == club`` (no transfer).
       2. Any other row's ``Team logo`` where ``Team == this row's club``
          (the transferred player's historical team).
-      3. Cross-season fallback via ``teams_club_logos`` when registered.
+      3. Cross-season fallback via ``teams_club_logos`` — matches ``competition``
+         to ``league`` when both columns exist so homonymous clubs get distinct crests.
       4. Row's ``Team logo`` as a last resort (current team — usually wrong for
          transferred players, but better than NULL).
     """
+    logos_have_comp = False
+    if TEAMS_CLUB_LOGOS_VIEW in list_views():
+        logos_have_comp = _view_has_column(conn, TEAMS_CLUB_LOGOS_VIEW, "competition")
+    outer_has_league = _view_has_column(conn, view, _LEAGUE_COL)
+    league_match_v2 = (
+        f" AND v2.{_LEAGUE_COL} = {outer}.{_LEAGUE_COL}" if outer_has_league else ""
+    )
+
     parts = [
         f'CASE WHEN {outer}."{_TEAM_COL}" = {outer}.{_CLUB_COL} '
         f'THEN CAST({outer}."{_TEAM_LOGO_COL}" AS VARCHAR) END',
         f'(SELECT CAST(v2."{_TEAM_LOGO_COL}" AS VARCHAR) '
         f"FROM {view} AS v2 "
-        f'WHERE v2."{_TEAM_COL}" = {outer}.{_CLUB_COL} '
+        f'WHERE v2."{_TEAM_COL}" = {outer}.{_CLUB_COL}{league_match_v2} '
         f'AND v2."{_TEAM_LOGO_COL}" IS NOT NULL '
         f"LIMIT 1)",
     ]
+
     if TEAMS_CLUB_LOGOS_VIEW in list_views():
+        where_extra = ""
+        if logos_have_comp and outer_has_league:
+            where_extra = f" AND cl.competition = {outer}.{_LEAGUE_COL}"
         parts.append(
             f"(SELECT CAST(cl.logo_url AS VARCHAR) "
             f"FROM {TEAMS_CLUB_LOGOS_VIEW} cl "
-            f"WHERE cl.team = {outer}.{_CLUB_COL} "
+            f"WHERE cl.team = {outer}.{_CLUB_COL}"
+            f"{where_extra} "
             f"ORDER BY cl.latest_file DESC NULLS LAST LIMIT 1)"
         )
     parts.append(f'CAST({outer}."{_TEAM_LOGO_COL}" AS VARCHAR)')
@@ -171,30 +189,49 @@ def club_logo_select_sql(
     if not (has_team and has_club):
         # Cannot disambiguate transferred players — return the row's logo.
         return f'CAST({outer}."{_TEAM_LOGO_COL}" AS VARCHAR) AS club_logo'
-    return _self_join_club_logo_sql(view, outer)
+    return _self_join_club_logo_sql(conn, view, outer)
 
 
 def resolve_club_logo(
-    conn: duckdb.DuckDBPyConnection, club: str | None, season: int
+    conn: duckdb.DuckDBPyConnection,
+    club: str | None,
+    season: int,
+    league: str | None = None,
 ) -> str | None:
-    """Logo URL for ``club`` in ``season`` from the same-season players view.
+    """Logo URL for ``club`` in ``season``, scoped by ``league`` when known.
 
-    Falls back to ``teams_club_logos`` (when registered) for cross-season
-    coverage of clubs the season parquet doesn't contain.
+    ``league`` aligns with Wyscout domestic competition / the player parquet's
+    ``league`` column. When omitted, resolution falls back to team name only where
+    needed.
+
+    Falls back to ``teams_club_logos`` (when registered) for rows missing from the
+    season view.
     """
     club_s = normalize_club_logo(club)
     if not club_s:
         return None
 
+    league_s = normalize_club_logo(league)
+
     view = f"players_{season}"
     if view in list_views():
+        has_league_col = _view_has_column(conn, view, _LEAGUE_COL)
         try:
-            row = conn.execute(
-                f'SELECT "{_TEAM_LOGO_COL}" FROM {view} '
-                f'WHERE "{_TEAM_COL}" = ? AND "{_TEAM_LOGO_COL}" IS NOT NULL '
-                "LIMIT 1",
-                [club_s],
-            ).fetchone()
+            if league_s and has_league_col:
+                row = conn.execute(
+                    f'SELECT "{_TEAM_LOGO_COL}" FROM {view} '
+                    f'WHERE "{_TEAM_COL}" = ? AND {_LEAGUE_COL} = ? '
+                    f'AND "{_TEAM_LOGO_COL}" IS NOT NULL '
+                    "LIMIT 1",
+                    [club_s, league_s],
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    f'SELECT "{_TEAM_LOGO_COL}" FROM {view} '
+                    f'WHERE "{_TEAM_COL}" = ? AND "{_TEAM_LOGO_COL}" IS NOT NULL '
+                    "LIMIT 1",
+                    [club_s],
+                ).fetchone()
         except Exception:
             row = None
         if row and row[0]:
@@ -203,8 +240,34 @@ def resolve_club_logo(
     if TEAMS_CLUB_LOGOS_VIEW not in list_views():
         return None
 
+    logos_have_comp = _view_has_column(conn, TEAMS_CLUB_LOGOS_VIEW, "competition")
     tag = season_csv_tag(season)
     pattern = f"%{tag}.csv"
+
+    if logos_have_comp and league_s:
+        rows = fetch_all_dicts(
+            conn,
+            f"""
+            SELECT logo_url FROM {TEAMS_CLUB_LOGOS_VIEW}
+            WHERE team = ? AND competition = ? AND latest_file LIKE ?
+            ORDER BY latest_file DESC NULLS LAST LIMIT 1
+            """,
+            [club_s, league_s, pattern],
+        )
+        if rows:
+            return normalize_club_logo(rows[0].get("logo_url"))
+        rows = fetch_all_dicts(
+            conn,
+            f"""
+            SELECT logo_url FROM {TEAMS_CLUB_LOGOS_VIEW}
+            WHERE team = ? AND competition = ?
+            ORDER BY latest_file DESC NULLS LAST LIMIT 1
+            """,
+            [club_s, league_s],
+        )
+        if rows:
+            return normalize_club_logo(rows[0].get("logo_url"))
+
     rows = fetch_all_dicts(
         conn,
         f"""
