@@ -16,4 +16,7 @@ __pycache__/
 .claude/
 .cursor/
 data/players/wyscout/
+
+# Trained xTV baseline (see scripts/train_xtv_baseline.py)
+models/
 scripts/data_gathering_and_cleaning.ipynb

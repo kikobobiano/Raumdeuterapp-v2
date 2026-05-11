@@ -138,6 +138,72 @@ def load_tm_valuations_raw(valuations_csv: Path) -> pd.DataFrame:
     return df[["player_id", "val_dt", "market_value_in_eur"]]
 
 
+def tm_mv_eur_asof_dates_for_tm_players(
+    player_tm_ids: pd.Series | np.ndarray,
+    reference_dates: pd.Series | np.ndarray,
+    *,
+    valuations_csv: Path,
+) -> pd.Series:
+    """Last ``market_value_in_eur`` with ``date`` ≤ ``reference_dates`` keyed by TM ``player_id``.
+
+    Uses the same cleansing as :func:`load_tm_valuations_raw`. Intended for aligning
+    training labels on ``transfers.csv`` (`player_id`, ``transfer_date``) with the
+    xTV valuation rule (historical snapshots only, backward as-of).
+
+    Rows with missing ``player_tm_ids`` / ``reference_dates`` or no earlier TM row
+    return ``NaN``.
+
+    Aligns indices with ``player_tm_ids`` when passed as a :class:`~pandas.Series`.
+    """
+    v_raw = load_tm_valuations_raw(valuations_csv)
+
+    if isinstance(player_tm_ids, pd.Series):
+        base_index = player_tm_ids.index
+        pt = pd.to_numeric(player_tm_ids, errors="coerce").astype("Int64")
+    else:
+        pt = pd.to_numeric(pd.Series(np.asarray(player_tm_ids)), errors="coerce").astype("Int64")
+        base_index = pd.RangeIndex(len(pt))
+
+    ref = pd.to_datetime(pd.Series(reference_dates), errors="coerce").dt.normalize()
+    if len(ref) != len(pt):
+        raise ValueError("reference_dates length must match player_tm_ids.")
+
+    frame = pd.DataFrame(
+        {
+            "_sort": np.arange(len(pt)),
+            "player_tm_id": pt,
+            "ref_dt": ref,
+        }
+    )
+    known = frame.dropna(subset=["player_tm_id", "ref_dt"]).copy()
+    known["player_tm_id"] = known["player_tm_id"].astype("int64")
+    known = known.sort_values(["player_tm_id", "ref_dt"], kind="mergesort")
+
+    vals = (
+        v_raw[v_raw["player_id"].isin(known["player_tm_id"].unique())]
+        .rename(columns={"val_dt": "_val_snap"})
+        .sort_values(["player_id", "_val_snap"], kind="mergesort")
+    )
+
+    left_m = known.rename(columns={"player_tm_id": "player_id"})
+    merged = pd.merge_asof(
+        left_m,
+        vals,
+        left_on="ref_dt",
+        right_on="_val_snap",
+        by="player_id",
+        direction="backward",
+    )
+
+    out = pd.Series(np.nan, index=np.arange(len(pt)), dtype="float64")
+    if len(merged) > 0:
+        out.iloc[np.asarray(merged["_sort"].astype(np.int64), dtype=int)] = merged[
+            "market_value_in_eur"
+        ].astype("float64").to_numpy()
+
+    return pd.Series(out.to_numpy(dtype=np.float64, copy=False), index=base_index)
+
+
 def valuations_long_with_wyscout(valuations_norm: pd.DataFrame, wy_tm: pd.DataFrame) -> pd.DataFrame:
     """Join TM valuations to Wyscout-export ids."""
     merged = valuations_norm.merge(wy_tm, left_on="player_id", right_on="player_tm_id", how="inner")
