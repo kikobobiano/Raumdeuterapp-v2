@@ -217,15 +217,6 @@ export function PlayerPositionPitch({
               <span className="data-mono opacity-85">{secondaryTokens.join(" · ")}</span>
             </p>
           )}
-          {heatmap && heatmap.points.length > 0 && (
-            <p className="text-on-surface-variant/80">
-              <span className="font-mono text-[0.65rem] font-semibold tracking-wider text-on-surface-variant/90">
-                Heatmap
-              </span>
-              <span className="mx-2 opacity-50">·</span>
-              <span className="opacity-85">maiores zonas de ação</span>
-            </p>
-          )}
         </div>
       )}
     </div>
