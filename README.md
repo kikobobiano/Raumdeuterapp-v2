@@ -1,40 +1,40 @@
 # Raumdeuter v2 (`Raumdeuterapp-v2`)
 
-Aplicação web de **scout e analytics** sobre estatísticas de jogadores e equipas (dados tipo Wyscout): perfis com radar e áreas de jogo, scatter, rankings, screener, tradução de performance entre ligas, potencial previsto, minutos por equipa e heatmaps tácticos no perfil.
+A web app for **football scouting and analytics** on player and team statistics (Wyscout-style data): profiles with radar and game-area views, scatter, rankings, screener, cross-league performance translation, potential estimates, team minutes, and tactical heatmaps on the player profile.
 
-É a evolução da app legacy em Streamlit (**raumdeuterapp**): mesma linha de produto com stack moderna orientada à performance e tipagem partilhada entre API e front-end.
+This is the successor to the legacy Streamlit app (**raumdeuterapp**): the same product direction with a performance-oriented stack and shared typing between the API and the front end.
 
 ## Stack
 
-| Camada | Tecnologia |
+| Layer | Technology |
 |--------|------------|
-| Front-end | [Next.js](https://nextjs.org/) 16 (App Router), React 19, TypeScript 5, Tailwind CSS 4, TanStack Query 5, Zustand |
-| Visualização | Plotly (`react-plotly.js`), SVG (`d3-contour` nos contornos do heatmap) |
-| API | [FastAPI](https://fastapi.tiangolo.com/), Pydantic v2, DuckDB sobre ficheiros Parquet |
-| Dados analytics | pandas, numpy, scipy, scikit-learn (ex.: similarity / potencial onde aplicável) |
-| Tooling monorepo | [pnpm](https://pnpm.io/) workspaces + [uv](https://docs.astral.sh/uv/) (Python 3.12) |
-| Contrato API ↔ TS | OpenAPI gerado pela FastAPI → tipos em `packages/shared-types` (`openapi-typescript`) |
+| Front end | [Next.js](https://nextjs.org/) 16 (App Router), React 19, TypeScript 5, Tailwind CSS 4, TanStack Query 5, Zustand |
+| Visualization | Plotly (`react-plotly.js`), SVG (`d3-contour` for heatmap contours) |
+| API | [FastAPI](https://fastapi.tiangolo.com/), Pydantic v2, DuckDB over Parquet files |
+| Analytics | pandas, numpy, scipy, scikit-learn (e.g. similarity / potential where applicable) |
+| Monorepo tooling | [pnpm](https://pnpm.io/) workspaces + [uv](https://docs.astral.sh/uv/) (Python 3.12) |
+| API ↔ TS contract | FastAPI OpenAPI → types in `packages/shared-types` (`openapi-typescript`) |
 
-## Layout do repositório
+## Repository layout
 
 ```
 apps/web                 # Next.js (UI)
-apps/api                 # FastAPI + domínio em app/core/, routers HTTP finos
-packages/shared-types    # openapi.json + api.d.ts gerados
-docker-compose.yml       # API + web com volumes (data read-only na API)
+apps/api                 # FastAPI + domain in app/core/, thin HTTP routers
+packages/shared-types    # Generated openapi.json + api.d.ts
+docker-compose.yml       # API + web with volumes (API data read-only mount)
 ```
 
-Os **Parquets de jogadores e equipas** não vêm no Git: espera-se um directório `data/` (por exemplo symlink para o repositório legacy onde já geraste os dados) ou `RAUMDEUTER_DATA_DIR` apontando para esses ficheiros.
+Player and team **Parquet files are not in Git**: provide a `data/` directory (often a symlink to the legacy repo where the data is produced) or set `RAUMDEUTER_DATA_DIR` to that path.
 
-## Pré-requisitos
+## Prerequisites
 
-- **Node.js** compatível com o `package.json` (recomendado: LTS atual) e **pnpm** (versão definida em `package.json` → campo `packageManager`).
-- **Python 3.12+** e **uv** para dependências da API (`apps/api`).
-- Pasta **`data/`** válida para a API arrancar (views DuckDB registadas no startup).
+- **Node.js** compatible with the root `package.json` (recommended: current LTS) and **pnpm** (version pinned via the `packageManager` field).
+- **Python 3.12+** and **uv** for the API (`apps/api`).
+- A valid **`data/`** layout so the API can start (DuckDB views registered at startup).
 
-## Instalação
+## Install
 
-Na raiz do monorepo:
+From the monorepo root:
 
 ```bash
 pnpm install
@@ -47,14 +47,14 @@ cd apps/api
 uv sync
 ```
 
-Variáveis úteis (ver `apps/api/app/settings.py`):
+Useful environment variables (see `apps/api/app/settings.py`):
 
-- `RAUMDEUTER_DATA_DIR` — caminho absoluto para a pasta `data` (Parquets). Em Docker usa-se `/data`.
-- `RAUMDEUTER_CORS_ORIGINS` — JSON array de origins permitidas (ex.: `["http://localhost:3000"]`).
+- `RAUMDEUTER_DATA_DIR` — absolute path to the `data` directory (Parquet files). Uses `/data` in Docker.
+- `RAUMDEUTER_CORS_ORIGINS` — JSON array of allowed origins (e.g. `["http://localhost:3000"]`).
 
-Copia `.env` apenas localmente (`/.env*` está no `.gitignore`); não comites secrets.
+Keep `.env` files local only (`*.env*` is `.gitignored`); do not commit secrets.
 
-## Correr em desenvolvimento
+## Development
 
 **Terminal 1 — API**
 
@@ -70,19 +70,19 @@ cd apps/web
 pnpm dev
 ```
 
-Por omissão: front em `http://localhost:3000`, API em `http://localhost:8000`. Garante que `NEXT_PUBLIC_API_URL` na web aponta para a API que estás a correr.
+Defaults: front end at `http://localhost:3000`, API at `http://localhost:8000`. Ensure `NEXT_PUBLIC_API_URL` in the web app points at the API you run.
 
 ## Docker
 
-Na raiz:
+From the repo root:
 
 ```bash
 docker compose up --build
 ```
 
-A API monta `./data:/data:ro`. Sem `data/` local preenchido, os endpoints que leem DuckDB falham até existirem os Parquets esperados.
+The API mounts `./data:/data:ro`. Without a populated local `data/`, DuckDB-backed endpoints fail until the expected Parquet files exist.
 
-## Testes e qualidade
+## Tests and quality
 
 ```bash
 # API
@@ -95,16 +95,16 @@ cd apps/web && pnpm exec tsc --noEmit
 cd apps/web && pnpm lint
 ```
 
-Depois de alterares schemas Pydantic na API, regera OpenAPI e os tipos TS (ver `AGENTS.md` na raiz para o comando exacto com `openapi-typescript`).
+After changing Pydantic schemas in the API, regenerate OpenAPI and the TypeScript types (exact command with `openapi-typescript` is documented in **`AGENTS.md`** at the repo root).
 
-## Documentação para contribuir
+## Contributing
 
-O ficheiro **`AGENTS.md`** descreve convenções de arquitectura (limites `core/` vs `routers/`, segurança SQL, limites de `LIMIT`, Plotly dinâmico, etc.). Lê esse ficheiro antes de alterações grandes.
+**`AGENTS.md`** describes architecture conventions (`core/` vs `routers/`, SQL safety, response `LIMIT`s, dynamic Plotly imports, etc.). Read it before large changes.
 
-## Licença e dados
+## License and data
 
-Este repositório contém **código** da aplicação. Os **dados Wyscout ou derivados** mantêm-se fora do Git; cada utilizador/fornecedor deve respeitar os termos da fonte dos dados.
+This repository ships **application code** only. **Wyscout-derived or vendor data** stays out of Git; comply with your data provider’s terms.
 
 ---
 
-*Nome do repositório no GitHub: **Raumdeuterapp-v2**.*
+GitHub repository: **[Raumdeuterapp-v2](https://github.com/kikobobiano/Raumdeuterapp-v2)**.
