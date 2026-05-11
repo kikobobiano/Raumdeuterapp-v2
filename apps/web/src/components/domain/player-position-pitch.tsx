@@ -27,11 +27,11 @@ const ZONES: { tokens: string[]; x: number; y: number; w: number; h: number }[] 
 
 const PITCH_FILL = "#151e2c";
 const LINE = "rgba(255,255,255,0.08)";
-/** Position dots — solid compare pink + dark halo so they read over cyan heatmap */
+/** Position dots — solid primary blue + dark halo (heatmap is same hue, softer) */
 const POSITION_RING = "#0a1018";
-const POSITION_PRIMARY_FILL = "#ff4d9d";
+const POSITION_PRIMARY_FILL = "#14d1ff";
 const POSITION_PRIMARY_STROKE = POSITION_RING;
-const POSITION_SECONDARY_FILL = "#d9488f";
+const POSITION_SECONDARY_FILL = "#0ea3d8";
 const POSITION_SECONDARY_STROKE = POSITION_RING;
 
 function insetRect(
@@ -200,7 +200,7 @@ export function PlayerPositionPitch({
           {primaryTokens.length > 0 && (
             <p className="text-on-surface">
               <span
-                className="font-mono text-[0.65rem] font-semibold tracking-wider text-[color:var(--color-compare-2)]"
+                className="font-mono text-[0.65rem] font-semibold tracking-wider text-[color:var(--color-primary)]"
               >
                 Primary
               </span>
