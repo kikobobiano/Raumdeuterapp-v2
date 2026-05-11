@@ -114,6 +114,34 @@ export function ProfileDetailClient() {
 
   const p = profileQ.data;
 
+  const heatmapQ = useQuery({
+    queryKey: ["heatmap", wyscoutId, season],
+    queryFn: async () => {
+      const { data, error, response } = await api.GET(
+        "/players/{wyscout_id}/heatmap",
+        {
+          params: {
+            path: { wyscout_id: wyscoutId },
+            query: { season },
+          },
+        },
+      );
+      if (error) {
+        if (response.status === 404) return null;
+        throw error;
+      }
+      return data ?? null;
+    },
+    enabled: profileQ.isSuccess && Number.isFinite(wyscoutId),
+    staleTime: 60 * 60 * 1000,
+  });
+
+  const heatmapForPitch = React.useMemo(() => {
+    const h = heatmapQ.data;
+    if (!h || !h.points.length) return null;
+    return { points: h.points, maxCount: h.max_count };
+  }, [heatmapQ.data]);
+
   const similarDeferGate = profileQ.isSuccess && !profileQ.isFetching;
   const similarFetchReady = useIdleReady(similarDeferGate);
   const showProfileSkeleton = useDelayedLoading(profileQ.isPending);
@@ -225,6 +253,7 @@ export function ProfileDetailClient() {
               <PlayerPositionPitch
                 primaryTokens={p.position_tokens_primary ?? (p.position_tokens ?? [])}
                 secondaryTokens={p.position_tokens_secondary ?? []}
+                heatmap={heatmapForPitch}
               />
             </GlassCard>
 
