@@ -591,3 +591,22 @@ class MinutesDistributionResponse(BaseModel):
     young_max_age: int
     prime_max_age: int
     players: list[MinutesDistributionPlayer]
+
+
+# ── F8: Heatmap ────────────────────────────────────────────────────────────────
+
+
+class HeatmapPoint(BaseModel):
+    x: float
+    y: float
+    count: int
+
+
+class HeatmapResponse(BaseModel):
+    wyscout_id: int
+    competition_id: int
+    competition: str
+    season: int
+    points: list[HeatmapPoint]
+    n_points: int
+    max_count: int
