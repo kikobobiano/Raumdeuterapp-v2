@@ -11,8 +11,8 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable
 
 # Same operation name + query string as the curl example from the user.
 HEATMAP_QUERY = (
@@ -115,6 +115,15 @@ def parse_points(payload: object) -> tuple[HeatmapPoint, ...]:
     return tuple(out)
 
 
+def _parse_retry_after(value: str | None, default: float) -> float:
+    if value is None:
+        return default
+    try:
+        return max(0.0, float(value))
+    except ValueError:
+        return default
+
+
 def fetch_one(
     *,
     url: str,
@@ -127,7 +136,9 @@ def fetch_one(
     """POST GraphQL request with linear backoff on HTTP 429/5xx.
 
     Raises the last exception on persistent failure so the main loop can
-    log it and move on (without writing a partial row).
+    log it and move on (without writing a partial row). Schema-shape
+    failures (``ValueError`` from ``json.loads`` or ``parse_points``)
+    propagate immediately — retrying won't fix a bad response shape.
     """
     body = build_body(wyscout_id=wyscout_id, competition_id=competition_id)
     req = urllib.request.Request(
@@ -136,6 +147,7 @@ def fetch_one(
 
     last_exc: Exception | None = None
     for attempt in range(max_retries):
+        sleep_for: float = retry_backoff_sec
         try:
             with urllib.request.urlopen(req, timeout=timeout_sec) as resp:
                 raw = resp.read().decode("utf-8")
@@ -150,11 +162,15 @@ def fetch_one(
             last_exc = e
             if e.code not in (429, 500, 502, 503, 504):
                 raise
-        except (urllib.error.URLError, TimeoutError, ValueError) as e:
+            if e.code == 429:
+                sleep_for = _parse_retry_after(
+                    e.headers.get("Retry-After"), retry_backoff_sec
+                )
+        except (urllib.error.URLError, TimeoutError) as e:
             last_exc = e
 
         if attempt < max_retries - 1:
-            time.sleep(retry_backoff_sec)
+            time.sleep(sleep_for)
 
     assert last_exc is not None
     raise last_exc
