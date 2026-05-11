@@ -32,10 +32,6 @@ function profileWyscoutIdFromPath(pathname: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-function scoutProfileRankingsHeader(pathname: string): boolean {
-  return pathname === "/scout/rankings" || pathname.startsWith("/scout/profile");
-}
-
 export function TopBar() {
   const pathname = usePathname();
   const router = useRouter();
@@ -43,12 +39,7 @@ export function TopBar() {
   const globalSeason = useGlobalFilters((s) => s.season);
   const setSeason = useGlobalFilters((s) => s.setSeason);
 
-  const showScoutControls = scoutProfileRankingsHeader(pathname);
-
-  const seasonsQ = useQuery({
-    ...metaSeasonsQueryOptions(),
-    enabled: showScoutControls,
-  });
+  const seasonsQ = useQuery(metaSeasonsQueryOptions());
 
   const list = seasonsQ.data;
   const urlSeason = searchParams.get("season");
@@ -58,13 +49,13 @@ export function TopBar() {
   );
 
   React.useEffect(() => {
-    if (!showScoutControls || list == null || list.length === 0) return;
+    if (list == null || list.length === 0) return;
     const raw = searchParams.get("season");
     if (raw == null || raw === "") return;
     const y = Number(raw);
     if (!list.includes(y) || globalSeason === y) return;
     setSeason(y);
-  }, [showScoutControls, list, searchParams, globalSeason, setSeason]);
+  }, [list, searchParams, globalSeason, setSeason]);
 
   const seasonOpts = (list ?? []).map((y) => ({
     value: String(y),
@@ -88,9 +79,10 @@ export function TopBar() {
         if (pid != null) {
           sp.delete("club");
           router.replace(`/scout/profile/${pid}?${sp.toString()}`);
-        } else {
-          router.replace(`/scout/profile?${sp.toString()}`);
+          return;
         }
+        router.replace(`/scout/profile?${sp.toString()}`);
+        return;
       }
     },
     [pathname, router, searchParams, setSeason],
@@ -108,26 +100,24 @@ export function TopBar() {
 
   return (
     <header className="flex h-16 min-w-0 items-center justify-end gap-4 border-b border-outline-variant bg-surface px-8">
-      {showScoutControls ? (
-        <div className="flex min-w-0 max-w-full items-center justify-end gap-3 sm:gap-4">
-          <PlayerSearch
+      <div className="flex min-w-0 max-w-full items-center justify-end gap-3 sm:gap-4">
+        <PlayerSearch
+          variant="minimal"
+          season={season}
+          onSelect={onPlayerSelect}
+          className="w-72 shrink-0 sm:w-80"
+          placeholder="Search Players"
+        />
+        <div className="w-[10.5rem] shrink-0 sm:w-44">
+          <Combobox
             variant="minimal"
-            season={season}
-            onSelect={onPlayerSelect}
-            className="w-72 shrink-0 sm:w-80"
-            placeholder="Search Players"
+            value={String(season)}
+            onChange={onSeasonChange}
+            options={seasonOpts}
+            placeholder="Season"
           />
-          <div className="w-[10.5rem] shrink-0 sm:w-44">
-            <Combobox
-              variant="minimal"
-              value={String(season)}
-              onChange={onSeasonChange}
-              options={seasonOpts}
-              placeholder="Season"
-            />
-          </div>
         </div>
-      ) : null}
+      </div>
     </header>
   );
 }
