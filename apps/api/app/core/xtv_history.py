@@ -1,4 +1,4 @@
-"""Performance index history over loaded seasons (projected columns; no ``SELECT *``)."""
+"""xTV history over loaded seasons (projected columns; mirror of pi_history)."""
 
 from __future__ import annotations
 
@@ -14,10 +14,10 @@ from app.core.metrics_catalog import column_names_in_view
 from app.core.profile_history_row import fetch_one_row_prefer_club
 from app.core.sql_ident import q_ident
 
-_PI_HISTORY_PREF_COLS = (
+_XTV_HISTORY_PREF_COLS = (
     "club",
     "league",
-    "performance_index",
+    "x_tv_eur",
     "Minutes played",
     "club_logo",
     "Team",
@@ -26,18 +26,8 @@ _PI_HISTORY_PREF_COLS = (
 )
 
 
-def _minutes_cell(rec: dict) -> int | None:
-    raw = rec.get("Minutes played")
-    if raw is None or (isinstance(raw, float) and raw != raw):
-        return None
-    try:
-        return int(float(raw))
-    except (TypeError, ValueError):
-        return None
-
-
-def _performance_index_cell(rec: dict) -> float | None:
-    raw = rec.get("performance_index")
+def _xtv_cell(rec: dict) -> float | None:
+    raw = rec.get("x_tv_eur")
     if raw is None or (isinstance(raw, float) and raw != raw):
         return None
     try:
@@ -47,19 +37,19 @@ def _performance_index_cell(rec: dict) -> float | None:
 
 
 def _project_columns(avail: set[str]) -> list[str] | None:
-    if "Minutes played" not in avail or "performance_index" not in avail:
+    if "Minutes played" not in avail or "x_tv_eur" not in avail:
         return None
-    return [c for c in _PI_HISTORY_PREF_COLS if c in avail]
+    return [c for c in _XTV_HISTORY_PREF_COLS if c in avail]
 
 
-def build_pi_history_payload(
+def build_xtv_history_payload(
     conn: duckdb.DuckDBPyConnection,
     wyscout_id: int,
     anchor_season: int,
     limit: int,
     preferred_club: str | None = None,
 ) -> list[dict[str, object | None]]:
-    """Dict rows matching ``PerformanceIndexHistoryPoint`` shape; chronological."""
+    """Dict rows matching ``XtvHistoryPoint`` shape; chronological."""
     seasons_all = list_seasons()
     if not seasons_all:
         return []
@@ -80,8 +70,8 @@ def build_pi_history_payload(
         rec = fetch_one_row_prefer_club(conn, view, select_sql, wyscout_id, preferred_club)
         if not rec:
             continue
-        pi = _performance_index_cell(rec)
-        if pi is None:
+        xtv = _xtv_cell(rec)
+        if xtv is None:
             continue
         club = rec.get("club")
         if club is not None and not isinstance(club, str):
@@ -93,10 +83,9 @@ def build_pi_history_payload(
         points.append(
             {
                 "season": yr,
-                "performance_index": float(pi),
+                "x_tv_eur": float(xtv),
                 "club": club if isinstance(club, str) else None,
                 "club_logo": logo,
-                "minutes_played": _minutes_cell(rec),
             },
         )
 

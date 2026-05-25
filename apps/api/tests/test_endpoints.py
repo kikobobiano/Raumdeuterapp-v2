@@ -273,10 +273,59 @@ def test_minutes_distribution() -> None:
         assert body["max_league_minutes"] == body["max_league_games"] * 90
         assert isinstance(body["players"], list)
         assert all(0 <= p["league_minutes_pct"] <= 100 for p in body["players"])
-        assert all(p["age_zone"] in ("young", "prime", "veteran") for p in body["players"])
+        assert all(
+            p["age_zone"] in ("youth", "peak", "experienced", "veteran")
+            for p in body["players"]
+        )
+        zs = body["zone_shares"]
+        for key in ("youth", "peak", "experienced", "veteran"):
+            assert key in zs and 0 <= zs[key] <= 100
         if body["players"]:
             mins = [p["minutes"] for p in body["players"]]
             assert mins == sorted(mins, reverse=True)
+            # Band assignments follow fixed cutoffs.
+            for p in body["players"]:
+                age = p.get("age")
+                if age is None:
+                    assert p["age_zone"] == "peak"
+                elif age < 23:
+                    assert p["age_zone"] == "youth"
+                elif age < 29:
+                    assert p["age_zone"] == "peak"
+                elif age < 34:
+                    assert p["age_zone"] == "experienced"
+                else:
+                    assert p["age_zone"] == "veteran"
+
+
+def test_minutes_distribution_league_overview() -> None:
+    with TestClient(app) as c:
+        seasons = c.get("/meta/seasons").json()
+        if not seasons:
+            return
+        s = max(seasons)
+        leagues = c.get(f"/meta/leagues?season={s}").json()
+        if not leagues:
+            return
+        league = leagues[0]
+        r = c.get(
+            f"/teams/minutes-distribution/league?season={s}&league={league}"
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["league"] == league
+        assert body["season"] == s
+        clubs = body["clubs"]
+        assert isinstance(clubs, list) and len(clubs) > 0
+        # Sorted by youth share desc, tie-break alphabetical.
+        keys = [(-c["zone_shares"]["youth"], c["club"].lower()) for c in clubs]
+        assert keys == sorted(keys)
+        for cl in clubs:
+            zs = cl["zone_shares"]
+            total = zs["youth"] + zs["peak"] + zs["experienced"] + zs["veteran"]
+            # Rounding leaves at most ~0.4pp slack.
+            assert cl["total_minutes"] >= 0
+            assert 99.0 <= total <= 101.0 or total == 0.0
 
 
 def test_screener_smoke() -> None:

@@ -102,17 +102,20 @@ def load_wyscout_to_tm_players(tm_dir: Path) -> pd.DataFrame:
         people[col] = pd.to_numeric(people[col], errors="coerce")
     people = people.dropna(subset=["key_transfermarkt"]).copy()
 
+    # Soccerway is what the parquet ``Wyscout id`` column carries for the bulk
+    # of players — emit it first so it wins the dedupe on wyscout_id collisions
+    # (key_wyscout chunk is a noisy fallback covering only a few hundred ids).
     chunks: list[pd.DataFrame] = []
-    w = people.dropna(subset=["key_wyscout"]).assign(
-        wyscout_id=lambda d: d["key_wyscout"].astype("int64"),
-        player_tm_id=lambda d: d["key_transfermarkt"].astype("int64"),
-    )[["wyscout_id", "player_tm_id"]]
-    chunks.append(w)
     sw = people.dropna(subset=["key_soccerway"]).assign(
         wyscout_id=lambda d: d["key_soccerway"].astype("int64"),
         player_tm_id=lambda d: d["key_transfermarkt"].astype("int64"),
     )[["wyscout_id", "player_tm_id"]]
     chunks.append(sw)
+    w = people.dropna(subset=["key_wyscout"]).assign(
+        wyscout_id=lambda d: d["key_wyscout"].astype("int64"),
+        player_tm_id=lambda d: d["key_transfermarkt"].astype("int64"),
+    )[["wyscout_id", "player_tm_id"]]
+    chunks.append(w)
     out = pd.concat(chunks, ignore_index=True).drop_duplicates(subset=["wyscout_id"], keep="first")
     return out
 
@@ -128,7 +131,7 @@ def load_tm_valuations_raw(valuations_csv: Path) -> pd.DataFrame:
     df["player_id"] = pd.to_numeric(df["player_id"], errors="coerce").astype("Int64")
     df = df.dropna(subset=["player_id"])
     df["player_id"] = df["player_id"].astype("int64")
-    df["val_dt"] = pd.to_datetime(df["date"], errors="coerce").dt.normalize()
+    df["val_dt"] = pd.to_datetime(df["date"], errors="coerce").dt.normalize().astype("datetime64[ns]")
     df["market_value_in_eur"] = pd.to_numeric(df["market_value_in_eur"], errors="coerce")
     df = df.dropna(subset=["val_dt", "market_value_in_eur"])
     df.loc[df["market_value_in_eur"] <= 0, "market_value_in_eur"] = np.nan
@@ -164,7 +167,7 @@ def tm_mv_eur_asof_dates_for_tm_players(
         pt = pd.to_numeric(pd.Series(np.asarray(player_tm_ids)), errors="coerce").astype("Int64")
         base_index = pd.RangeIndex(len(pt))
 
-    ref = pd.to_datetime(pd.Series(reference_dates), errors="coerce").dt.normalize()
+    ref = pd.to_datetime(pd.Series(reference_dates), errors="coerce").dt.normalize().astype("datetime64[ns]")
     if len(ref) != len(pt):
         raise ValueError("reference_dates length must match player_tm_ids.")
 
@@ -177,12 +180,12 @@ def tm_mv_eur_asof_dates_for_tm_players(
     )
     known = frame.dropna(subset=["player_tm_id", "ref_dt"]).copy()
     known["player_tm_id"] = known["player_tm_id"].astype("int64")
-    known = known.sort_values(["player_tm_id", "ref_dt"], kind="mergesort")
+    known = known.sort_values("ref_dt", kind="mergesort")
 
     vals = (
         v_raw[v_raw["player_id"].isin(known["player_tm_id"].unique())]
         .rename(columns={"val_dt": "_val_snap"})
-        .sort_values(["player_id", "_val_snap"], kind="mergesort")
+        .sort_values("_val_snap", kind="mergesort")
     )
 
     left_m = known.rename(columns={"player_tm_id": "player_id"})
@@ -271,7 +274,7 @@ def infer_tm_market_value_eur(
             for i in range(len(wy_num))
         ],
         dtype="datetime64[ns]",
-    )
+    ).astype("datetime64[ns]")
 
     left = pd.DataFrame(
         {
@@ -283,12 +286,14 @@ def infer_tm_market_value_eur(
     left_known = (
         left.dropna(subset=["wyscout_id", "ref_dt"])
         .assign(wyscout_id=lambda d: d["wyscout_id"].astype("int64"))
-        .sort_values(["wyscout_id", "ref_dt"], kind="mergesort")
+        .sort_values("ref_dt", kind="mergesort")
     )
 
     v_sub = v_long[v_long["wyscout_id"].isin(left_known["wyscout_id"].unique())].copy()
     # merge_asof right key must carry a distinct name after rename
-    v_sub_side = v_sub.rename(columns={"val_dt": "_val_snap"})
+    v_sub_side = v_sub.rename(columns={"val_dt": "_val_snap"}).sort_values(
+        "_val_snap", kind="mergesort"
+    )
 
     merged = pd.merge_asof(
         left_known,

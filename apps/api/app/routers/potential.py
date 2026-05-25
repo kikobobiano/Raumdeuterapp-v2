@@ -52,8 +52,8 @@ def potential(req: PotentialRequest) -> PotentialResponse:
     if age_min > age_max:
         return PotentialResponse(players=[], n=0)
 
-    parts: list[str] = ['p."Age" >= ?', 'p."Age" <= ?', 'p."Minutes played" >= ?']
-    params: list[Any] = [age_min, age_max, minutes_min]
+    parts: list[str] = []
+    params: list[Any] = []
 
     if f.leagues:
         parts.append(f"p.league IN ({','.join(['?'] * len(f.leagues))})")
@@ -85,9 +85,11 @@ def potential(req: PotentialRequest) -> PotentialResponse:
     with duckdb_session() as conn:
         vcols = column_names_in_view(conn, view)
         age_sel = player_age_sql(vcols, f.season, table_alias="p")
+        age_parts = [f"({age_sel}) >= ?", f"({age_sel}) <= ?", 'p."Minutes played" >= ?']
+        age_params: list[Any] = [age_min, age_max, minutes_min]
         logo_sql = club_logo_select_sql(conn, view, f.season, table_alias="p")
         img_sql = player_image_select_sql(conn, view, table_alias="p")
-        where = " AND ".join(parts)
+        where = " AND ".join(age_parts + parts)
         sql = f"""
             SELECT
               {logo_sql},
@@ -108,7 +110,7 @@ def potential(req: PotentialRequest) -> PotentialResponse:
             WHERE {where}
             ORDER BY ps.potential_score DESC NULLS LAST
         """
-        rows = fetch_all_dicts(conn, sql, [f.season, *params])
+        rows = fetch_all_dicts(conn, sql, [f.season, *age_params, *params])
 
     players = [
         PotentialPlayer(
@@ -144,6 +146,7 @@ def _build_cohort_where(
     age: int,
     f: Any,
     require_potential: bool = True,
+    age_expr: str = 'p."Age"',
 ) -> tuple[str, list[Any]]:
     """SQL ``WHERE`` for a single age cohort. ``age`` overrides ``age_min/age_max``."""
     if age > AGE_MAX_HARD:
@@ -151,7 +154,7 @@ def _build_cohort_where(
     minutes_min = (
         MINUTES_MIN_HARD if f.minutes_min is None else max(f.minutes_min, MINUTES_MIN_HARD)
     )
-    parts: list[str] = ['p."Age" = ?', 'p."Minutes played" >= ?']
+    parts: list[str] = [f"({age_expr}) = ?", 'p."Minutes played" >= ?']
     params: list[Any] = [age, minutes_min]
 
     if f.leagues:
@@ -198,11 +201,10 @@ def potential_cohort(req: PotentialCohortRequest) -> PotentialCohortResponse:
     if req.age > AGE_MAX_HARD:
         return PotentialCohortResponse(age=req.age, players=[], total=0)
 
-    where, params = _build_cohort_where(age=req.age, f=f, require_potential=True)
-
     with duckdb_session() as conn:
         vcols = column_names_in_view(conn, view)
         age_sel = player_age_sql(vcols, f.season, table_alias="p")
+        where, params = _build_cohort_where(age=req.age, f=f, require_potential=True, age_expr=age_sel)
         logo_sql = club_logo_select_sql(conn, view, f.season, table_alias="p")
         img_sql = player_image_select_sql(conn, view, table_alias="p")
         join_sql = (

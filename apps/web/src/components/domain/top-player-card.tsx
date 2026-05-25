@@ -167,15 +167,15 @@ export function TopPlayerCard({
             <p
               className={cn(
                 "data-mono text-2xl font-bold leading-none",
-                performanceIndex == null && "text-on-surface-variant",
+                (performanceIndex == null || (minutes ?? 0) <= 500) && "text-on-surface-variant",
               )}
               style={
-                performanceIndex != null
+                performanceIndex != null && (minutes ?? 0) > 500
                   ? { color: scoutProfileIndexColor(performanceIndex, "text") }
                   : undefined
               }
             >
-              {performanceIndex != null ? performanceIndex.toFixed(1) : "—"}
+              {performanceIndex != null && (minutes ?? 0) > 500 ? performanceIndex.toFixed(1) : "—"}
             </p>
           </div>
         </div>

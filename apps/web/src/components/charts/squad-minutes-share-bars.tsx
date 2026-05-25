@@ -29,8 +29,9 @@ interface Props {
 }
 
 const ZONE_TINT: Record<AgeZone, string> = {
-  young: "#14d1ff",
-  prime: "#00ff41",
+  youth: "#14d1ff",
+  peak: "#00ff41",
+  experienced: "#fb923c",
   veteran: "#fbbf24",
 };
 

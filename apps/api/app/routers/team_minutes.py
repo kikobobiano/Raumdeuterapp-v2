@@ -1,12 +1,16 @@
-"""Squad minutes distribution for a single club in a single season.
+"""Squad minutes distribution.
 
-Returns every player rostered to the chosen ``club`` in the season's parquet
-view, with their season minutes, matches, age, and share of the static league
-maximum (``LEAGUE_MAX_GAMES[league] * 90``).
+`/teams/minutes-distribution` — per-club view: every player rostered to ``club``
+in ``season``'s parquet view with season minutes, matches, age, % of static
+league max (``LEAGUE_MAX_GAMES[league] * 90``), age band, plus the squad-level
+share of minutes per band.
 
-Used by ``/teams/minutes-distribution`` (Team Metrics → Minutes Distribution
-page) for the squad scatter (age vs minutes) and the per-player league-share
-bar chart.
+`/teams/minutes-distribution/league` — league overview: one row per club in the
+chosen league with that club's total minutes and per-band zone shares. Used to
+compare squads across the league before drilling into a single club.
+
+Age bands are fixed: youth (<23), peak (<29), experienced (<34), veteran
+(>=34). Missing age collapses to ``peak`` so a player never disappears.
 """
 from __future__ import annotations
 
@@ -14,45 +18,63 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 
-from app.core.club_logos import normalize_club_logo
+from app.core.club_logos import club_logo_select_sql, normalize_club_logo
 from app.core.config import league_max_games, league_max_minutes
 from app.core.duckdb_pool import duckdb_session, fetch_all_dicts, list_views
 from app.core.filters import view_name
 from app.core.metrics_catalog import column_names_in_view
-from app.core.club_logos import club_logo_select_sql
 from app.core.player_age import player_age_sql
 from app.core.player_image import player_image_select_sql
-from app.schemas import MinutesDistributionPlayer, MinutesDistributionResponse
+from app.schemas import (
+    AgeBand,
+    LeagueClubBand,
+    LeagueMinutesOverviewResponse,
+    MinutesDistributionPlayer,
+    MinutesDistributionResponse,
+    ZoneShares,
+)
 
 router = APIRouter(prefix="/teams", tags=["teams"])
 
+YOUTH_MAX = 22  # age < 23
+PEAK_MAX = 28  # age < 29
+EXPERIENCED_MAX = 33  # age < 34
 
-def _age_zone(age: int | None, young_max: int, prime_max: int) -> str:
-    """Map an integer age to a young / prime / veteran band.
 
-    Cutoffs are inclusive upper bounds (``young_max=22`` → ``age <= 22`` is
-    young). Missing ages collapse to ``prime`` so they never disappear from the
-    bar chart.
+def _age_band(age: int | None) -> AgeBand:
+    """Map integer age to youth / peak / experienced / veteran.
+
+    Missing age → ``peak`` so the player still contributes to the squad
+    breakdown rather than vanishing.
     """
     if age is None:
-        return "prime"
-    if age <= young_max:
-        return "young"
-    if age <= prime_max:
-        return "prime"
+        return "peak"
+    if age <= YOUTH_MAX:
+        return "youth"
+    if age <= PEAK_MAX:
+        return "peak"
+    if age <= EXPERIENCED_MAX:
+        return "experienced"
     return "veteran"
+
+
+def _zone_shares_from_minutes(by_band: dict[str, int]) -> ZoneShares:
+    total = sum(by_band.values())
+    if total <= 0:
+        return ZoneShares()
+    return ZoneShares(
+        youth=round(100.0 * by_band.get("youth", 0) / total, 1),
+        peak=round(100.0 * by_band.get("peak", 0) / total, 1),
+        experienced=round(100.0 * by_band.get("experienced", 0) / total, 1),
+        veteran=round(100.0 * by_band.get("veteran", 0) / total, 1),
+    )
 
 
 @router.get("/minutes-distribution", response_model=MinutesDistributionResponse)
 def minutes_distribution(
     season: int = Query(..., description="Season start year (e.g. 2025 for 25-26)"),
     club: str = Query(..., min_length=1, description="Club name as stored in parquet `club`"),
-    young_max: int = Query(22, ge=15, le=40, description="Inclusive max age for the 'young' band"),
-    prime_max: int = Query(30, ge=16, le=45, description="Inclusive max age for the 'prime' band"),
 ) -> MinutesDistributionResponse:
-    if young_max >= prime_max:
-        raise HTTPException(400, "young_max must be < prime_max")
-
     view = view_name(season)
     if view not in list_views():
         raise HTTPException(404, f"season {season} not loaded")
@@ -107,6 +129,7 @@ def minutes_distribution(
             club_logo = candidate
             break
 
+    band_minutes: dict[str, int] = {"youth": 0, "peak": 0, "experienced": 0, "veteran": 0}
     players: list[MinutesDistributionPlayer] = []
     for r in rows:
         minutes = _safe_int(r.get("minutes")) or 0
@@ -114,6 +137,8 @@ def minutes_distribution(
         pct = max(0.0, min(100.0, pct))
         age = _safe_int(r.get("age"))
         wid = _safe_int(r.get("wyscout_id"))
+        band = _age_band(age)
+        band_minutes[band] += minutes
         players.append(
             MinutesDistributionPlayer(
                 wyscout_id=wid,
@@ -124,7 +149,7 @@ def minutes_distribution(
                 minutes=minutes,
                 matches=_safe_int(r.get("matches")),
                 league_minutes_pct=round(pct, 1),
-                age_zone=_age_zone(age, young_max, prime_max),  # type: ignore[arg-type]
+                age_zone=band,
             )
         )
 
@@ -135,9 +160,90 @@ def minutes_distribution(
         season=season,
         max_league_games=max_games,
         max_league_minutes=max_minutes,
-        young_max_age=young_max,
-        prime_max_age=prime_max,
+        zone_shares=_zone_shares_from_minutes(band_minutes),
         players=players,
+    )
+
+
+@router.get(
+    "/minutes-distribution/league",
+    response_model=LeagueMinutesOverviewResponse,
+)
+def minutes_distribution_league(
+    season: int = Query(..., description="Season start year (e.g. 2025 for 25-26)"),
+    league: str = Query(..., min_length=1, description="League name as stored in parquet `league`"),
+) -> LeagueMinutesOverviewResponse:
+    view = view_name(season)
+    if view not in list_views():
+        raise HTTPException(404, f"season {season} not loaded")
+
+    with duckdb_session() as conn:
+        cols = column_names_in_view(conn, view)
+        if "Minutes played" not in cols:
+            raise HTTPException(422, "'Minutes played' column missing from season view")
+        if "club" not in cols:
+            raise HTTPException(422, "'club' column missing from season view")
+        if "league" not in cols:
+            raise HTTPException(422, "'league' column missing from season view")
+
+        age_expr = player_age_sql(cols, season)
+        logo_sql = club_logo_select_sql(conn, view, season)
+
+        sql = f"""
+            SELECT
+                club,
+                {logo_sql},
+                ({age_expr}) AS age,
+                CAST("Minutes played" AS INTEGER) AS minutes
+            FROM {view}
+            WHERE league = ?
+              AND "Minutes played" IS NOT NULL
+        """
+        rows = fetch_all_dicts(conn, sql, [league])
+
+    if not rows:
+        raise HTTPException(404, f"No players found for league {league!r} in season {season}")
+
+    by_club: dict[str, dict[str, Any]] = {}
+    for r in rows:
+        club = str(r.get("club") or "").strip()
+        if not club:
+            continue
+        bucket = by_club.setdefault(
+            club,
+            {
+                "logo": None,
+                "bands": {"youth": 0, "peak": 0, "experienced": 0, "veteran": 0},
+            },
+        )
+        if bucket["logo"] is None:
+            candidate = normalize_club_logo(r.get("club_logo"))
+            if candidate:
+                bucket["logo"] = candidate
+        minutes = _safe_int(r.get("minutes")) or 0
+        band = _age_band(_safe_int(r.get("age")))
+        bucket["bands"][band] += minutes
+
+    clubs: list[LeagueClubBand] = []
+    for club_name, b in by_club.items():
+        bands: dict[str, int] = b["bands"]
+        clubs.append(
+            LeagueClubBand(
+                club=club_name,
+                club_logo=b["logo"],
+                total_minutes=sum(bands.values()),
+                zone_shares=_zone_shares_from_minutes(bands),
+            )
+        )
+
+    clubs.sort(key=lambda c: (-c.zone_shares.youth, c.club.lower()))
+
+    return LeagueMinutesOverviewResponse(
+        league=league,
+        season=season,
+        max_league_games=league_max_games(league),
+        max_league_minutes=league_max_minutes(league),
+        clubs=clubs,
     )
 
 

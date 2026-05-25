@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 const SUB_NAV = [
   { href: "/teams/best-xi", label: "Best XI" },
   { href: "/teams/minutes-distribution", label: "Minutes Distribution" },
+  { href: "/teams/squad-value", label: "Squad Value" },
 ];
 
 export default function TeamsLayout({ children }: { children: React.ReactNode }) {

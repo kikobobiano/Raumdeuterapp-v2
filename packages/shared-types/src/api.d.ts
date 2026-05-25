@@ -237,6 +237,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/players/{wyscout_id}/xtv-history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Xtv History
+         * @description Up to ``limit`` consecutive loaded seasons ending at ``season``, non-null xTV rows only (chronological).
+         */
+        get: operations["xtv_history_players__wyscout_id__xtv_history_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/players/{wyscout_id}/performance-index-history": {
         parameters: {
             query?: never;
@@ -248,7 +268,7 @@ export interface paths {
          * Performance Index History
          * @description Up to ``limit`` consecutive loaded seasons ending at ``season``, non-null PI rows only (chronological).
          *
-         *     One row per season: the club with most minutes (same default as profile).
+         *     One row per season: ``club`` when provided, else the club with most minutes (profile default).
          */
         get: operations["performance_index_history_players__wyscout_id__performance_index_history_get"];
         put?: never;
@@ -438,6 +458,57 @@ export interface paths {
         };
         /** Minutes Distribution */
         get: operations["minutes_distribution_teams_minutes_distribution_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/teams/minutes-distribution/league": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Minutes Distribution League */
+        get: operations["minutes_distribution_league_teams_minutes_distribution_league_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/teams/squad-value/league": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Squad Value League */
+        get: operations["squad_value_league_teams_squad_value_league_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/teams/squad-value/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Squad Value History */
+        get: operations["squad_value_history_teams_squad_value_history_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -787,6 +858,34 @@ export interface components {
             /** Max Count */
             max_count: number;
         };
+        /** LeagueClubBand */
+        LeagueClubBand: {
+            /** Club */
+            club: string;
+            /** Club Logo */
+            club_logo?: string | null;
+            /** Total Minutes */
+            total_minutes: number;
+            zone_shares: components["schemas"]["ZoneShares"];
+        };
+        /**
+         * LeagueMinutesOverviewResponse
+         * @description League-wide minutes overview: one row per club, with each club's squad
+         *     minutes broken down by age band (% of that club's total minutes). Sorted by
+         *     youth share descending, tie-broken alphabetically by club.
+         */
+        LeagueMinutesOverviewResponse: {
+            /** League */
+            league: string;
+            /** Season */
+            season: number;
+            /** Max League Games */
+            max_league_games: number;
+            /** Max League Minutes */
+            max_league_minutes: number;
+            /** Clubs */
+            clubs: components["schemas"]["LeagueClubBand"][];
+        };
         /**
          * LeagueStyleFitRow
          * @description Cosine similarity of player style vs minutes-weighted league centroid (see legacy League Style Fit).
@@ -842,7 +941,7 @@ export interface components {
              * Age Zone
              * @enum {string}
              */
-            age_zone: "young" | "prime" | "veteran";
+            age_zone: "youth" | "peak" | "experienced" | "veteran";
         };
         /**
          * MinutesDistributionResponse
@@ -852,6 +951,9 @@ export interface components {
          *     `LEAGUE_MAX_GAMES` table in `core/config.py`. Multi-stage / playoff leagues
          *     use the regular-season game count; downstream callers clamp the per-player
          *     pct to 100 in case a player accrues playoff minutes on top.
+         *
+         *     Age bands are fixed: youth (<23), peak (<29), experienced (<34),
+         *     veteran (>=34). `zone_shares` are % of the squad's total minutes played.
          */
         MinutesDistributionResponse: {
             /** Club */
@@ -866,10 +968,7 @@ export interface components {
             max_league_games: number;
             /** Max League Minutes */
             max_league_minutes: number;
-            /** Young Max Age */
-            young_max_age: number;
-            /** Prime Max Age */
-            prime_max_age: number;
+            zone_shares: components["schemas"]["ZoneShares"];
             /** Players */
             players: components["schemas"]["MinutesDistributionPlayer"][];
         };
@@ -886,6 +985,11 @@ export interface components {
             club?: string | null;
             /** Club Logo */
             club_logo?: string | null;
+            /**
+             * Minutes Played
+             * @description Season minutes for this row; UI hides PI headline under typical radar threshold.
+             */
+            minutes_played?: number | null;
         };
         /**
          * PerformanceIndexHistoryResponse
@@ -982,12 +1086,27 @@ export interface components {
             performance_index: number | null;
             /** Performance Index Percentile */
             performance_index_percentile?: number | null;
+            /**
+             * Performance Index Role Rank
+             * @description Rank (1-based) of this player among same-role peers in the percentile cohort.
+             */
+            performance_index_role_rank?: number | null;
+            /**
+             * Performance Index Role Cohort Size
+             * @description Total players in the same-role percentile cohort (denominator for the rank).
+             */
+            performance_index_role_cohort_size?: number | null;
             /** Games */
             games?: number | null;
             /** Goals */
             goals?: number | null;
             /** Assists */
             assists?: number | null;
+            /**
+             * X Tv Eur
+             * @description Expected transfer value (EUR) from the xTV v2 model for the player's season row.
+             */
+            x_tv_eur?: number | null;
             /**
              * Player Image Url
              * @description HTTPS headshot URL (Transfermarkt CDN or Wyscout image when enriched in parquet)
@@ -1013,6 +1132,11 @@ export interface components {
              * @description Filled when GET /players/{wyscout_id}/profile sets performance_index_history_limit (mini PI trajectory).
              */
             performance_index_history?: components["schemas"]["PerformanceIndexHistoryPoint"][] | null;
+            /**
+             * X Tv History
+             * @description Filled when GET /players/{wyscout_id}/profile sets x_tv_history_limit (mini xTV trajectory).
+             */
+            x_tv_history?: components["schemas"]["XtvHistoryPoint"][] | null;
         };
         /** PlayerTrait */
         PlayerTrait: {
@@ -1414,6 +1538,79 @@ export interface components {
                 [key: string]: number | null;
             };
         };
+        /** SquadValueHistoryResponse */
+        SquadValueHistoryResponse: {
+            /** Club */
+            club: string;
+            /** Rows */
+            rows: components["schemas"]["SquadValueHistoryRow"][];
+        };
+        /** SquadValueHistoryRow */
+        SquadValueHistoryRow: {
+            /** Club */
+            club: string;
+            /** Club Logo */
+            club_logo?: string | null;
+            /** League */
+            league?: string | null;
+            /** N Players */
+            n_players: number;
+            /** Avg Age */
+            avg_age?: number | null;
+            /** Total Xtv Eur */
+            total_xtv_eur?: number | null;
+            /** Avg Xtv Eur */
+            avg_xtv_eur?: number | null;
+            /** Total Market Value Eur */
+            total_market_value_eur?: number | null;
+            /** Avg Market Value Eur */
+            avg_market_value_eur?: number | null;
+            /**
+             * Foreign Share
+             * @description Share (0-1) of players whose Passport country differs from the modal squad passport.
+             */
+            foreign_share?: number | null;
+            /** Season */
+            season: number;
+        };
+        /** SquadValueLeagueResponse */
+        SquadValueLeagueResponse: {
+            /** Season */
+            season: number;
+            /** League */
+            league: string;
+            /** Teams */
+            teams: components["schemas"]["SquadValueTeamRow"][];
+        };
+        /**
+         * SquadValueTeamRow
+         * @description Squad-level aggregates for one club in one season.
+         */
+        SquadValueTeamRow: {
+            /** Club */
+            club: string;
+            /** Club Logo */
+            club_logo?: string | null;
+            /** League */
+            league?: string | null;
+            /** N Players */
+            n_players: number;
+            /** Avg Age */
+            avg_age?: number | null;
+            /** Total Xtv Eur */
+            total_xtv_eur?: number | null;
+            /** Avg Xtv Eur */
+            avg_xtv_eur?: number | null;
+            /** Total Market Value Eur */
+            total_market_value_eur?: number | null;
+            /** Avg Market Value Eur */
+            avg_market_value_eur?: number | null;
+            /**
+             * Foreign Share
+             * @description Share (0-1) of players whose Passport country differs from the modal squad passport.
+             */
+            foreign_share?: number | null;
+        };
         /** StrengthAdjustment */
         StrengthAdjustment: {
             /** Value */
@@ -1589,6 +1786,54 @@ export interface components {
             input?: unknown;
             /** Context */
             ctx?: Record<string, never>;
+        };
+        /**
+         * XtvHistoryPoint
+         * @description Single season snapshot for scout profile xTV progression (club = dominant minutes row).
+         */
+        XtvHistoryPoint: {
+            /** Season */
+            season: number;
+            /** X Tv Eur */
+            x_tv_eur: number;
+            /** Club */
+            club?: string | null;
+            /** Club Logo */
+            club_logo?: string | null;
+        };
+        /**
+         * XtvHistoryResponse
+         * @description Chronological (oldest → newest), at most ``limit`` seasons with non-null xTV.
+         */
+        XtvHistoryResponse: {
+            /** Points */
+            points: components["schemas"]["XtvHistoryPoint"][];
+        };
+        /**
+         * ZoneShares
+         * @description Share of total team minutes per age band, rounded to 1dp (percent).
+         */
+        ZoneShares: {
+            /**
+             * Youth
+             * @default 0
+             */
+            youth: number;
+            /**
+             * Peak
+             * @default 0
+             */
+            peak: number;
+            /**
+             * Experienced
+             * @default 0
+             */
+            experienced: number;
+            /**
+             * Veteran
+             * @default 0
+             */
+            veteran: number;
         };
     };
     responses: never;
@@ -1951,12 +2196,51 @@ export interface operations {
             };
         };
     };
+    xtv_history_players__wyscout_id__xtv_history_get: {
+        parameters: {
+            query: {
+                /** @description Anchor season (inclusive) — last N loaded seasons up to this year. */
+                season: number;
+                limit?: number;
+                /** @description When set, prefer this club's row each season (fallback: most minutes). */
+                club?: string | null;
+            };
+            header?: never;
+            path: {
+                wyscout_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["XtvHistoryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     performance_index_history_players__wyscout_id__performance_index_history_get: {
         parameters: {
             query: {
                 /** @description Anchor season (inclusive) — last N loaded seasons up to this year. */
                 season: number;
                 limit?: number;
+                /** @description When set, prefer this club's row each season (fallback: most minutes). */
+                club?: string | null;
             };
             header?: never;
             path: {
@@ -1997,6 +2281,8 @@ export interface operations {
                 min_minutes?: number;
                 /** @description When set, include up to N PI trajectory seasons inside this response. */
                 performance_index_history_limit?: number | null;
+                /** @description When set, include up to N xTV trajectory seasons inside this response. */
+                x_tv_history_limit?: number | null;
             };
             header?: never;
             path: {
@@ -2332,10 +2618,6 @@ export interface operations {
                 season: number;
                 /** @description Club name as stored in parquet `club` */
                 club: string;
-                /** @description Inclusive max age for the 'young' band */
-                young_max?: number;
-                /** @description Inclusive max age for the 'prime' band */
-                prime_max?: number;
             };
             header?: never;
             path?: never;
@@ -2350,6 +2632,108 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MinutesDistributionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    minutes_distribution_league_teams_minutes_distribution_league_get: {
+        parameters: {
+            query: {
+                /** @description Season start year (e.g. 2025 for 25-26) */
+                season: number;
+                /** @description League name as stored in parquet `league` */
+                league: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LeagueMinutesOverviewResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    squad_value_league_teams_squad_value_league_get: {
+        parameters: {
+            query: {
+                /** @description Season start year, e.g. 2024 for 24-25 */
+                season: number;
+                /** @description League name as stored in parquet `league` */
+                league: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SquadValueLeagueResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    squad_value_history_teams_squad_value_history_get: {
+        parameters: {
+            query: {
+                /** @description Club name as stored in parquet `club` */
+                club: string;
+                /** @description Optional explicit list of seasons; defaults to all loaded seasons. */
+                seasons?: number[] | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SquadValueHistoryResponse"];
                 };
             };
             /** @description Validation Error */

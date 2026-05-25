@@ -17,7 +17,6 @@ import { ChartSkeleton } from "@/components/skeletons/chart-skeleton";
 import { Button } from "@/components/ui/button";
 import { Combobox } from "@/components/ui/combobox";
 import { GlassCard } from "@/components/ui/glass-card";
-import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/loading";
 import { useDelayedLoading } from "@/hooks/use-delayed-loading";
 import { useScoutFiltersSidebar } from "@/hooks/use-scout-filters-sidebar";
@@ -30,36 +29,13 @@ import {
   SquadMinutesShareBars,
   type SquadShareRow,
 } from "@/components/charts/squad-minutes-share-bars";
+import { LeagueZoneSharesBars } from "@/components/charts/league-zone-shares-bars";
+import { ZoneSharesStrip } from "@/components/charts/zone-shares-strip";
 
 type Response = components["schemas"]["MinutesDistributionResponse"];
 type Player = components["schemas"]["MinutesDistributionPlayer"];
-
-const DEFAULT_YOUNG_MAX = 22;
-const DEFAULT_PRIME_MAX = 30;
-
-/** Tracks "user picked a league but clubs haven't arrived yet" so the effect
- * that auto-picks ``clubs[0]`` only fires from a real change, not from initial
- * URL hydration where the existing club may legitimately not match the cached
- * empty list. */
-type PendingAutoSwap = "league-changed" | null;
-
-function clampInt(v: string, min: number, max: number, fallback: number): number {
-  const n = parseInt(v, 10);
-  if (!Number.isFinite(n)) return fallback;
-  return Math.max(min, Math.min(max, n));
-}
-
-function readIntParam(
-  sp: URLSearchParams,
-  key: string,
-  min: number,
-  max: number,
-  fallback: number,
-): number {
-  const raw = sp.get(key);
-  if (raw == null) return fallback;
-  return clampInt(raw, min, max, fallback);
-}
+type LeagueOverview =
+  components["schemas"]["LeagueMinutesOverviewResponse"];
 
 function pad2(n: number): string {
   return n.toString().padStart(2, "0");
@@ -67,12 +43,14 @@ function pad2(n: number): string {
 
 /** Slugify a string for filenames: ASCII letters/digits/underscore only. */
 function slugifyForFilename(s: string): string {
-  return s
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-zA-Z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .toLowerCase() || "all";
+  return (
+    s
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-zA-Z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .toLowerCase() || "all"
+  );
 }
 
 export function MinutesDistributionClient() {
@@ -85,12 +63,6 @@ export function MinutesDistributionClient() {
 
   const league = searchParams.get("league") ?? "";
   const club = searchParams.get("club") ?? "";
-  const youngMax = readIntParam(searchParams, "young_max", 15, 44, DEFAULT_YOUNG_MAX);
-  const primeMax = readIntParam(searchParams, "prime_max", 16, 45, DEFAULT_PRIME_MAX);
-
-  const cutoffsValid = youngMax < primeMax;
-
-  const pendingAutoSwapRef = React.useRef<PendingAutoSwap>(null);
 
   const updateParams = React.useCallback(
     (updates: Record<string, string | null>) => {
@@ -106,14 +78,11 @@ export function MinutesDistributionClient() {
   );
 
   const setLeague = (v: string) => {
-    pendingAutoSwapRef.current = "league-changed";
-    updateParams({ league: v || null });
+    // Switching league always clears the club so the league overview can
+    // render until the user drills back in.
+    updateParams({ league: v || null, club: null });
   };
   const setClub = (v: string) => updateParams({ club: v || null });
-  const setYoungMax = (n: number) =>
-    updateParams({ young_max: n === DEFAULT_YOUNG_MAX ? null : String(n) });
-  const setPrimeMax = (n: number) =>
-    updateParams({ prime_max: n === DEFAULT_PRIME_MAX ? null : String(n) });
 
   const leaguesQ = useQuery({
     queryKey: ["meta-leagues", f.season],
@@ -144,43 +113,49 @@ export function MinutesDistributionClient() {
 
   const clubs = clubsQ.data ?? [];
 
+  // Drop an invalid club param when it no longer matches the league filter.
+  // Do NOT auto-pick a club when none is set — that hides the league overview.
   React.useEffect(() => {
     if (clubsQ.isPending || clubs.length === 0) return;
-    if (club && clubs.includes(club)) return;
-    if (pendingAutoSwapRef.current === "league-changed") {
-      pendingAutoSwapRef.current = null;
-      updateParams({ club: clubs[0] });
-      return;
-    }
     if (club && !clubs.includes(club)) {
-      // URL has a club that no longer exists in the current league filter.
-      // Replace with the first club so the page never sits with an invalid id.
-      updateParams({ club: clubs[0] });
+      updateParams({ club: null });
     }
   }, [clubs, club, clubsQ.isPending, updateParams]);
 
   const distQ = useQuery({
-    enabled: !!club && cutoffsValid,
-    queryKey: ["team-minutes", f.season, club, youngMax, primeMax],
+    enabled: !!club,
+    queryKey: ["team-minutes", f.season, club],
     placeholderData: keepPreviousData,
     queryFn: async () => {
       const { data, error } = await api.GET("/teams/minutes-distribution", {
-        params: {
-          query: {
-            season: f.season,
-            club,
-            young_max: youngMax,
-            prime_max: primeMax,
-          },
-        },
+        params: { query: { season: f.season, club } },
       });
       if (error) throw new Error(JSON.stringify(error));
       return data as Response;
     },
   });
 
+  const leagueOverviewQ = useQuery({
+    enabled: !!league && !club,
+    queryKey: ["team-minutes-league", f.season, league],
+    placeholderData: keepPreviousData,
+    queryFn: async () => {
+      const { data, error } = await api.GET(
+        "/teams/minutes-distribution/league",
+        { params: { query: { season: f.season, league } } },
+      );
+      if (error) throw new Error(JSON.stringify(error));
+      return data as LeagueOverview;
+    },
+  });
+
   const result = distQ.data;
-  const showSkeleton = useDelayedLoading(!!club && cutoffsValid && distQ.isPending);
+  const overview = leagueOverviewQ.data;
+
+  const showClubSkeleton = useDelayedLoading(!!club && distQ.isPending);
+  const showLeagueSkeleton = useDelayedLoading(
+    !!league && !club && leagueOverviewQ.isPending,
+  );
 
   const shareRows: SquadShareRow[] = React.useMemo(
     () =>
@@ -198,7 +173,13 @@ export function MinutesDistributionClient() {
     [result],
   );
 
-  const filename = `minutes-distribution-${slugifyForFilename(club || "no-club")}-${pad2(f.season % 100)}-${pad2((f.season + 1) % 100)}.png`;
+  const filename = club
+    ? `minutes-distribution-${slugifyForFilename(club)}-${pad2(f.season % 100)}-${pad2((f.season + 1) % 100)}.png`
+    : league
+      ? `minutes-distribution-${slugifyForFilename(league)}-overview-${pad2(f.season % 100)}-${pad2((f.season + 1) % 100)}.png`
+      : `minutes-distribution-${pad2(f.season % 100)}-${pad2((f.season + 1) % 100)}.png`;
+
+  const showingLeagueOverview = !!league && !club;
 
   return (
     <ExportProvider title="Minutes Distribution" filename={filename}>
@@ -233,7 +214,10 @@ export function MinutesDistributionClient() {
                   <Combobox
                     options={[
                       { value: "", label: "All leagues" },
-                      ...(leaguesQ.data ?? []).map((l) => ({ value: l, label: l })),
+                      ...(leaguesQ.data ?? []).map((l) => ({
+                        value: l,
+                        label: l,
+                      })),
                     ]}
                     value={league}
                     onChange={setLeague}
@@ -243,10 +227,13 @@ export function MinutesDistributionClient() {
 
                 <div>
                   <h3 className="mb-2 text-xs font-semibold uppercase tracking-widest text-content-muted">
-                    Club <span className="text-primary">*</span>
+                    Club
                   </h3>
                   <Combobox
-                    options={clubs.map((c) => ({ value: c, label: c }))}
+                    options={[
+                      { value: "", label: league ? "League overview" : "Pick a club" },
+                      ...clubs.map((c) => ({ value: c, label: c })),
+                    ]}
                     value={club}
                     onChange={setClub}
                     placeholder={
@@ -255,45 +242,8 @@ export function MinutesDistributionClient() {
                   />
                 </div>
 
-                <div>
-                  <h3 className="mb-2 text-xs font-semibold uppercase tracking-widest text-content-muted">
-                    Age zones
-                  </h3>
-                  <div className="grid grid-cols-2 gap-2">
-                    <label className="flex flex-col gap-1 text-[11px] text-content-muted">
-                      Young max
-                      <Input
-                        type="number"
-                        min={15}
-                        max={primeMax - 1}
-                        value={youngMax}
-                        onChange={(e) =>
-                          setYoungMax(
-                            clampInt(e.target.value, 15, primeMax - 1, DEFAULT_YOUNG_MAX),
-                          )
-                        }
-                        className="h-9"
-                      />
-                    </label>
-                    <label className="flex flex-col gap-1 text-[11px] text-content-muted">
-                      Prime max
-                      <Input
-                        type="number"
-                        min={youngMax + 1}
-                        max={45}
-                        value={primeMax}
-                        onChange={(e) =>
-                          setPrimeMax(
-                            clampInt(e.target.value, youngMax + 1, 45, DEFAULT_PRIME_MAX),
-                          )
-                        }
-                        className="h-9"
-                      />
-                    </label>
-                  </div>
-                  <p className="mt-2 text-[10px] text-content-muted">
-                    Young ≤ {youngMax} · Prime {youngMax + 1}–{primeMax} · Veteran &gt; {primeMax}
-                  </p>
+                <div className="rounded bg-surface-low/40 px-3 py-2 text-[10px] leading-snug text-content-muted">
+                  Age bands · Youth &lt; 23 · Peak &lt; 29 · Experienced &lt; 34 · Veteran ≥ 34
                 </div>
               </GlassCard>
             </aside>
@@ -316,7 +266,9 @@ export function MinutesDistributionClient() {
                   <p className="mt-1 text-sm text-on-surface-variant">
                     {result
                       ? `${result.club} · ${result.league ?? "Unknown league"} · ${result.season}/${pad2((result.season + 1) % 100)} · max ${result.max_league_games} games (${result.max_league_minutes.toLocaleString()} min)`
-                      : "Pick a club to see squad minutes."}
+                      : overview
+                        ? `${overview.league} · ${overview.season}/${pad2((overview.season + 1) % 100)} · league overview · ${overview.clubs.length} clubs`
+                        : "Pick a league or club to begin."}
                   </p>
                 </div>
               </div>
@@ -350,19 +302,49 @@ export function MinutesDistributionClient() {
             </div>
           </div>
 
-          {!club && (
+          {!league && !club && (
             <div className="flex min-h-[40vh] items-center justify-center text-sm text-content-muted">
-              Pick a club from the sidebar to load the squad.
+              Pick a league for an overview, or a club for the full squad view.
             </div>
           )}
 
-          {!cutoffsValid && (
-            <div className="flex min-h-[20vh] items-center justify-center text-sm text-amber-300">
-              Young max must be lower than Prime max.
+          {showLeagueSkeleton && (
+            <GlassCard className="p-6">
+              <div className="space-y-2">
+                {Array.from({ length: 12 }).map((_, i) => (
+                  <Skeleton key={i} className="h-8 w-full rounded-md" />
+                ))}
+              </div>
+            </GlassCard>
+          )}
+
+          {leagueOverviewQ.isError && showingLeagueOverview && (
+            <div className="flex min-h-[40vh] items-center justify-center text-sm text-red-400">
+              Error loading league overview: {String(leagueOverviewQ.error)}
             </div>
           )}
 
-          {showSkeleton && (
+          {showingLeagueOverview && overview && (
+            <ExportSection
+              id="league-overview"
+              label="League youth-share bars"
+              defaultIncluded
+            >
+              <GlassCard className="p-4 sm:p-6">
+                <h2 className="mb-3 text-sm font-semibold uppercase tracking-widest text-content-muted">
+                  Squad Age Mix · {overview.league}
+                </h2>
+                <LeagueZoneSharesBars
+                  rows={overview.clubs}
+                  league={overview.league}
+                  season={overview.season}
+                  onSelectClub={setClub}
+                />
+              </GlassCard>
+            </ExportSection>
+          )}
+
+          {showClubSkeleton && (
             <div className="space-y-6">
               <GlassCard className="p-6">
                 <ChartSkeleton variant="scatter" height={420} />
@@ -377,14 +359,23 @@ export function MinutesDistributionClient() {
             </div>
           )}
 
-          {distQ.isError && (
+          {distQ.isError && club && (
             <div className="flex min-h-[40vh] items-center justify-center text-sm text-red-400">
               Error loading squad: {String(distQ.error)}
             </div>
           )}
 
-          {result && cutoffsValid && (
+          {result && club && (
             <div className="flex flex-col gap-6">
+              <ExportSection id="zone-shares" label="Squad age mix" defaultIncluded>
+                <GlassCard className="p-4 sm:p-6">
+                  <ZoneSharesStrip
+                    shares={result.zone_shares}
+                    caption={`${result.club} · share of minutes by age band`}
+                  />
+                </GlassCard>
+              </ExportSection>
+
               <ExportSection id="scatter" label="Age vs Minutes scatter" defaultIncluded>
                 <GlassCard className="p-4 sm:p-6">
                   <h2 className="mb-3 text-sm font-semibold uppercase tracking-widest text-content-muted">
@@ -405,8 +396,6 @@ export function MinutesDistributionClient() {
                     league={result.league ?? null}
                     clubLogoUrl={result.club_logo ?? null}
                     season={result.season}
-                    youngMaxAge={result.young_max_age}
-                    primeMaxAge={result.prime_max_age}
                     maxLeagueMinutes={result.max_league_minutes}
                   />
                 </GlassCard>

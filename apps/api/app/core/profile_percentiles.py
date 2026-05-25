@@ -6,6 +6,9 @@ from collections.abc import Sequence
 
 import duckdb
 
+from app.core.config import role_for_position
+from app.core.duckdb_pool import fetch_all_dicts
+from app.core.metrics_catalog import column_names_in_view
 from app.core.sql_ident import q_ident
 
 
@@ -53,3 +56,49 @@ def percentiles_for_cohort(
         cell = row[j]
         out[metric] = float(cell) if cell is not None else None
     return out
+
+
+def performance_index_role_rank(
+    conn: duckdb.DuckDBPyConnection,
+    view: str,
+    role: str,
+    cohort_where_sql: str,
+    cohort_params: list[object],
+    player_pi: float,
+) -> tuple[int, int] | None:
+    """Rank (1-based) and cohort size for ``role`` players inside the percentile cohort.
+
+    Returns ``None`` when the role/PI cannot be resolved. Role is derived from the
+    primary/main position column via :func:`role_for_position` (no role column in views).
+    """
+    avail = column_names_in_view(conn, view)
+    pos_col: str | None = None
+    for cand in ("Primary position", "Position"):
+        if cand in avail:
+            pos_col = cand
+            break
+    if pos_col is None or "performance_index" not in avail:
+        return None
+
+    tail = cohort_where_sql.strip() if cohort_where_sql.strip() else "TRUE"
+    sql = (
+        f"SELECT {q_ident(pos_col)} AS pos, performance_index "
+        f"FROM {view} WHERE {tail} AND performance_index IS NOT NULL"
+    )
+    rows = fetch_all_dicts(conn, sql, cohort_params)
+    same_role_pis: list[float] = []
+    for r in rows:
+        pos = r.get("pos")
+        if not isinstance(pos, str):
+            continue
+        if role_for_position(pos) != role:
+            continue
+        v = r.get("performance_index")
+        try:
+            same_role_pis.append(float(v))
+        except (TypeError, ValueError):
+            continue
+    if not same_role_pis:
+        return None
+    rank = 1 + sum(1 for v in same_role_pis if v > player_pi)
+    return rank, len(same_role_pis)

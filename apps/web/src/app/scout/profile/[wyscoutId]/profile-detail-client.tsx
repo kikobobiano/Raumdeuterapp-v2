@@ -6,7 +6,9 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import * as React from "react";
 
 import { PercentileBar } from "@/components/charts/percentile-bar";
+import { PerformanceIndexMiniChart } from "@/components/charts/performance-index-mini-chart";
 import { RadarChart } from "@/components/charts/radar-chart";
+import { XtvMiniChart } from "@/components/charts/xtv-mini-chart";
 import { PlayerPositionPitch } from "@/components/domain/player-position-pitch";
 import { PlayerProfileHeader } from "@/components/domain/player-profile-header";
 import { PlayerTraitsBlock } from "@/components/domain/player-traits-block";
@@ -30,6 +32,8 @@ import { cn } from "@/lib/utils";
 
 /** Bundled PI trajectory rows (GET /profile?performance_index_history_limit=…). */
 const PROFILE_PI_HISTORY_EMBED = 5;
+/** Bundled xTV trajectory rows (GET /profile?x_tv_history_limit=…). */
+const PROFILE_XTV_HISTORY_EMBED = 5;
 
 function buildExportFilename(player: string | undefined | null, season: number): string {
   const base = player
@@ -91,7 +95,14 @@ export function ProfileDetailClient() {
     (!seasonsReadyNotEmpty || seasonProbablyValid);
 
   const profileQ = useQuery({
-    queryKey: ["profile", wyscoutId, season, urlClub, PROFILE_PI_HISTORY_EMBED],
+    queryKey: [
+      "profile",
+      wyscoutId,
+      season,
+      urlClub,
+      PROFILE_PI_HISTORY_EMBED,
+      PROFILE_XTV_HISTORY_EMBED,
+    ],
     queryFn: async () => {
       const { data, error, response } = await api.GET("/players/{wyscout_id}/profile", {
         params: {
@@ -100,6 +111,7 @@ export function ProfileDetailClient() {
             season,
             club: urlClub ?? undefined,
             performance_index_history_limit: PROFILE_PI_HISTORY_EMBED,
+            x_tv_history_limit: PROFILE_XTV_HISTORY_EMBED,
           },
         },
       });
@@ -200,7 +212,7 @@ export function ProfileDetailClient() {
           <ExportSection id="header" label="Player header" required defaultIncluded>
             <div className="space-y-6">
               <PlayerProfileHeader
-                key={p.wyscout_id ?? p.player}
+                key={`${p.wyscout_id ?? p.player}-${p.club ?? ""}`}
                 playerName={p.player}
                 club={p.club}
                 league={p.league}
@@ -208,15 +220,16 @@ export function ProfileDetailClient() {
                 age={p.age}
                 height={p.height}
                 foot={p.foot ?? null}
-                performanceIndex={p.performance_index}
-                performanceIndexPercentile={p.performance_index_percentile ?? null}
+                performanceIndex={(p.minutes ?? 0) > 500 ? p.performance_index : null}
+                performanceIndexPercentile={(p.minutes ?? 0) > 500 ? (p.performance_index_percentile ?? null) : null}
+                performanceIndexRoleRank={(p.minutes ?? 0) > 500 ? (p.performance_index_role_rank ?? null) : null}
+                role={p.role ?? null}
                 games={p.games ?? null}
                 goals={p.goals ?? null}
                 assists={p.assists ?? null}
                 imageUrl={p.player_image_url ?? null}
                 wyscoutId={p.wyscout_id ?? null}
                 piHistoryPoints={p.performance_index_history ?? undefined}
-                piHistoryLoading={profileQ.isPending}
               />
 
               {(p.clubs_in_season?.length ?? 0) > 1 && (
@@ -228,6 +241,21 @@ export function ProfileDetailClient() {
               )}
             </div>
           </ExportSection>
+
+          {((p.x_tv_history?.length ?? 0) > 0 ||
+            (p.performance_index_history?.length ?? 0) > 0) && (
+            <ExportSection
+              id="xtv-pi-progression"
+              label="xTV & performance index progression"
+              defaultIncluded
+            >
+              <ProgressionSections
+                xtvHistory={p.x_tv_history ?? null}
+                piHistory={p.performance_index_history ?? null}
+                showPiSeasonHeadline={(p.minutes ?? 0) > 500}
+              />
+            </ExportSection>
+          )}
 
           <ExportSection id="overview" label="Radar, positions & similar" defaultIncluded>
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-3 lg:gap-6">
@@ -378,6 +406,142 @@ export function ProfileDetailClient() {
       )}
     </div>
     </ExportProvider>
+  );
+}
+
+type PiHistoryRow = {
+  season: number;
+  performance_index: number;
+  club?: string | null;
+  club_logo?: string | null;
+};
+
+type XtvHistoryRow = {
+  season: number;
+  x_tv_eur: number;
+  club?: string | null;
+  club_logo?: string | null;
+};
+
+function fmtEurCompact(n: number): string {
+  if (n >= 1e6) {
+    const m = n / 1e6;
+    return m >= 10 ? `€${m.toFixed(0)}M` : `€${m.toFixed(1)}M`;
+  }
+  if (n >= 1e3) return `€${(n / 1e3).toFixed(0)}k`;
+  return `€${Math.round(n)}`;
+}
+
+function deltaLabel(curr: number, prev: number, formatter: (n: number) => string): {
+  text: string;
+  up: boolean;
+} | null {
+  const d = curr - prev;
+  if (!Number.isFinite(d) || Math.abs(d) < 1e-9) return null;
+  const sign = d > 0 ? "+" : "−";
+  return { text: `${sign}${formatter(Math.abs(d))} YoY`, up: d > 0 };
+}
+
+function ProgressionSections({
+  xtvHistory,
+  piHistory,
+  showPiSeasonHeadline,
+}: {
+  xtvHistory: XtvHistoryRow[] | null;
+  piHistory: PiHistoryRow[] | null;
+  /** Current-season minutes; below radar threshold we hide PI value + YoY (chart stays). */
+  showPiSeasonHeadline: boolean;
+}) {
+  const hasXtv = (xtvHistory?.length ?? 0) > 0;
+  const hasPi = (piHistory?.length ?? 0) > 0;
+  if (!hasXtv && !hasPi) return null;
+
+  const xtvLast = hasXtv ? xtvHistory![xtvHistory!.length - 1]!.x_tv_eur : null;
+  const xtvPrev =
+    hasXtv && xtvHistory!.length >= 2
+      ? xtvHistory![xtvHistory!.length - 2]!.x_tv_eur
+      : null;
+  const xtvDelta =
+    xtvLast != null && xtvPrev != null ? deltaLabel(xtvLast, xtvPrev, fmtEurCompact) : null;
+
+  const piLast = hasPi ? piHistory![piHistory!.length - 1]!.performance_index : null;
+  const piPrev =
+    hasPi && piHistory!.length >= 2
+      ? piHistory![piHistory!.length - 2]!.performance_index
+      : null;
+  const piColor =
+    piLast != null ? scoutProfileIndexColor(piLast, "text") : undefined;
+  const piDelta =
+    piLast != null && piPrev != null
+      ? deltaLabel(piLast, piPrev, (n) => n.toFixed(1))
+      : null;
+
+  return (
+    <div className="grid gap-6 lg:grid-cols-2">
+      <GlassCard>
+        <p className="label-caps mb-2">xTV progression</p>
+        {hasXtv ? (
+          <>
+            <div className="flex items-baseline gap-3">
+              <p className="data-mono text-2xl text-on-surface">
+                {fmtEurCompact(xtvLast!)}
+              </p>
+              {xtvDelta ? (
+                <span
+                  className="data-mono text-sm font-semibold"
+                  style={{
+                    color: xtvDelta.up
+                      ? "var(--color-success, #34d399)"
+                      : "var(--color-error, #f87171)",
+                  }}
+                >
+                  {xtvDelta.up ? "▲" : "▼"} {xtvDelta.text}
+                </span>
+              ) : null}
+            </div>
+            <div className="mt-3">
+              <XtvMiniChart points={xtvHistory!} />
+            </div>
+          </>
+        ) : (
+          <p className="text-sm text-on-surface-variant">No Market Value data available</p>
+        )}
+      </GlassCard>
+      <GlassCard>
+        <p className="label-caps mb-2">Performance index progression</p>
+        {hasPi ? (
+          <>
+            {showPiSeasonHeadline ? (
+              <div className="flex items-baseline gap-3">
+                <p
+                  className="data-mono text-2xl"
+                  style={piColor != null ? { color: piColor } : undefined}
+                >
+                  {piLast!.toFixed(1)}
+                </p>
+                {piDelta ? (
+                  <span
+                    className="data-mono text-sm font-semibold"
+                    style={{
+                      color: piDelta.up
+                        ? "var(--color-success, #34d399)"
+                        : "var(--color-error, #f87171)",
+                    }}
+                  >
+                    {piDelta.up ? "▲" : "▼"} {piDelta.text}
+                  </span>
+                ) : null}
+              </div>
+            ) : null}
+            <div className={cn(showPiSeasonHeadline && "mt-3")}>
+              <PerformanceIndexMiniChart points={piHistory!} />
+            </div>
+          </>
+        ) : (
+          <p className="text-sm text-on-surface-variant">No PI history.</p>
+        )}
+      </GlassCard>
+    </div>
   );
 }
 

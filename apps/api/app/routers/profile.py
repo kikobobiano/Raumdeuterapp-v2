@@ -19,8 +19,9 @@ from app.core.club_logos import club_logo_from_parquet_row, normalize_club_logo,
 from app.core.pi_history import build_pi_history_payload
 from app.core.player_age import player_age_for_season
 from app.core.player_traits import TRAIT_METRICS, select_player_traits
-from app.core.profile_percentiles import percentiles_for_cohort
+from app.core.profile_percentiles import percentiles_for_cohort, performance_index_role_rank
 from app.core.sql_ident import q_ident
+from app.core.xtv_history import build_xtv_history_payload
 from app.schemas import (
     GameAreaProfileBlock,
     PerformanceIndexHistoryPoint,
@@ -29,6 +30,8 @@ from app.schemas import (
     PlayerTrait,
     ProfileClubStint,
     ProfileMetric,
+    XtvHistoryPoint,
+    XtvHistoryResponse,
 )
 
 router = APIRouter(prefix="/players", tags=["profile"])
@@ -157,18 +160,40 @@ def _secondary_position_parts(rec: dict, cols: set[str]) -> list[str]:
 
 
 
+@router.get("/{wyscout_id}/xtv-history", response_model=XtvHistoryResponse)
+def xtv_history(
+    wyscout_id: int,
+    season: int = Query(..., description="Anchor season (inclusive) — last N loaded seasons up to this year."),
+    limit: int = Query(5, ge=1, le=10),
+    club: str | None = Query(
+        None,
+        description="When set, prefer this club's row each season (fallback: most minutes).",
+    ),
+) -> XtvHistoryResponse:
+    """Up to ``limit`` consecutive loaded seasons ending at ``season``, non-null xTV rows only (chronological)."""
+    with duckdb_session() as conn:
+        payload = build_xtv_history_payload(conn, wyscout_id, season, limit, club)
+        return XtvHistoryResponse(
+            points=[XtvHistoryPoint(**p) for p in payload],
+        )
+
+
 @router.get("/{wyscout_id}/performance-index-history", response_model=PerformanceIndexHistoryResponse)
 def performance_index_history(
     wyscout_id: int,
     season: int = Query(..., description="Anchor season (inclusive) — last N loaded seasons up to this year."),
     limit: int = Query(5, ge=1, le=10),
+    club: str | None = Query(
+        None,
+        description="When set, prefer this club's row each season (fallback: most minutes).",
+    ),
 ) -> PerformanceIndexHistoryResponse:
     """Up to ``limit`` consecutive loaded seasons ending at ``season``, non-null PI rows only (chronological).
 
-    One row per season: the club with most minutes (same default as profile).
+    One row per season: ``club`` when provided, else the club with most minutes (profile default).
     """
     with duckdb_session() as conn:
-        payload = build_pi_history_payload(conn, wyscout_id, season, limit)
+        payload = build_pi_history_payload(conn, wyscout_id, season, limit, club)
         return PerformanceIndexHistoryResponse(
             points=[PerformanceIndexHistoryPoint(**p) for p in payload],
         )
@@ -192,6 +217,12 @@ def profile(
         ge=1,
         le=10,
         description="When set, include up to N PI trajectory seasons inside this response.",
+    ),
+    x_tv_history_limit: int | None = Query(
+        None,
+        ge=1,
+        le=10,
+        description="When set, include up to N xTV trajectory seasons inside this response.",
     ),
 ) -> PlayerProfile:
     view = f"players_{season}"
@@ -384,6 +415,12 @@ def profile(
             )
 
         pi_pct = pct_batch.get("performance_index")
+
+        role_rank_pair: tuple[int, int] | None = None
+        if pi is not None and role:
+            role_rank_pair = performance_index_role_rank(
+                conn, view, role, cohort_where, cohort_params, float(pi)
+            )
         img = _player_image_url(rec, conn)
         games = _pick_int(
             rec,
@@ -420,9 +457,24 @@ def profile(
         pi_embed: list[PerformanceIndexHistoryPoint] | None = None
         if performance_index_history_limit is not None:
             raw_hist = build_pi_history_payload(
-                conn, wyscout_id, season, performance_index_history_limit
+                conn,
+                wyscout_id,
+                season,
+                performance_index_history_limit,
+                club,
             )
             pi_embed = [PerformanceIndexHistoryPoint(**p) for p in raw_hist]
+
+        xtv_embed: list[XtvHistoryPoint] | None = None
+        if x_tv_history_limit is not None:
+            raw_xtv = build_xtv_history_payload(
+                conn,
+                wyscout_id,
+                season,
+                x_tv_history_limit,
+                club,
+            )
+            xtv_embed = [XtvHistoryPoint(**p) for p in raw_xtv]
 
         return PlayerProfile(
             wyscout_id=intg("Wyscout id"),
@@ -443,9 +495,12 @@ def profile(
             table=table,
             performance_index=pi,
             performance_index_percentile=pi_pct,
+            performance_index_role_rank=role_rank_pair[0] if role_rank_pair else None,
+            performance_index_role_cohort_size=role_rank_pair[1] if role_rank_pair else None,
             games=games,
             goals=goals_n,
             assists=assists_n,
+            x_tv_eur=num("x_tv_eur"),
             player_image_url=img,
             position_tokens=toks,
             position_tokens_primary=toks_primary,
@@ -461,4 +516,5 @@ def profile(
                 for r in stint_rows
             ],
             performance_index_history=pi_embed,
+            x_tv_history=xtv_embed,
         )

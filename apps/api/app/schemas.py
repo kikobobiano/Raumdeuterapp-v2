@@ -176,9 +176,21 @@ class PlayerProfile(BaseModel):
     table: list[ProfileMetric]
     performance_index: float | None
     performance_index_percentile: float | None = None
+    performance_index_role_rank: int | None = Field(
+        default=None,
+        description="Rank (1-based) of this player among same-role peers in the percentile cohort.",
+    )
+    performance_index_role_cohort_size: int | None = Field(
+        default=None,
+        description="Total players in the same-role percentile cohort (denominator for the rank).",
+    )
     games: int | None = None
     goals: float | None = None
     assists: float | None = None
+    x_tv_eur: float | None = Field(
+        default=None,
+        description="Expected transfer value (EUR) from the xTV v2 model for the player's season row.",
+    )
     player_image_url: str | None = Field(
         default=None,
         description="HTTPS headshot URL (Transfermarkt CDN or Wyscout image when enriched in parquet)",
@@ -196,6 +208,10 @@ class PlayerProfile(BaseModel):
         default=None,
         description="Filled when GET /players/{wyscout_id}/profile sets performance_index_history_limit (mini PI trajectory).",
     )
+    x_tv_history: list[XtvHistoryPoint] | None = Field(
+        default=None,
+        description="Filled when GET /players/{wyscout_id}/profile sets x_tv_history_limit (mini xTV trajectory).",
+    )
 
 
 class PerformanceIndexHistoryPoint(BaseModel):
@@ -205,12 +221,31 @@ class PerformanceIndexHistoryPoint(BaseModel):
     performance_index: float
     club: str | None = None
     club_logo: str | None = None
+    minutes_played: int | None = Field(
+        default=None,
+        description="Season minutes for this row; UI hides PI headline under typical radar threshold.",
+    )
 
 
 class PerformanceIndexHistoryResponse(BaseModel):
     """Chronological (oldest → newest), at most ``limit`` seasons with non-null PI."""
 
     points: list[PerformanceIndexHistoryPoint]
+
+
+class XtvHistoryPoint(BaseModel):
+    """Single season snapshot for scout profile xTV progression (club = dominant minutes row)."""
+
+    season: int
+    x_tv_eur: float
+    club: str | None = None
+    club_logo: str | None = None
+
+
+class XtvHistoryResponse(BaseModel):
+    """Chronological (oldest → newest), at most ``limit`` seasons with non-null xTV."""
+
+    points: list[XtvHistoryPoint]
 
 
 # ── F4: Progression ────────────────────────────────────────────────────────────
@@ -561,6 +596,18 @@ class PotentialCohortResponse(BaseModel):
     total: int
 
 
+AgeBand = Literal["youth", "peak", "experienced", "veteran"]
+
+
+class ZoneShares(BaseModel):
+    """Share of total team minutes per age band, rounded to 1dp (percent)."""
+
+    youth: float = 0.0
+    peak: float = 0.0
+    experienced: float = 0.0
+    veteran: float = 0.0
+
+
 class MinutesDistributionPlayer(BaseModel):
     wyscout_id: int | None = None
     player: str
@@ -570,7 +617,7 @@ class MinutesDistributionPlayer(BaseModel):
     minutes: int
     matches: int | None = None
     league_minutes_pct: float
-    age_zone: Literal["young", "prime", "veteran"]
+    age_zone: AgeBand
 
 
 class MinutesDistributionResponse(BaseModel):
@@ -580,6 +627,9 @@ class MinutesDistributionResponse(BaseModel):
     `LEAGUE_MAX_GAMES` table in `core/config.py`. Multi-stage / playoff leagues
     use the regular-season game count; downstream callers clamp the per-player
     pct to 100 in case a player accrues playoff minutes on top.
+
+    Age bands are fixed: youth (<23), peak (<29), experienced (<34),
+    veteran (>=34). `zone_shares` are % of the squad's total minutes played.
     """
 
     club: str
@@ -588,9 +638,27 @@ class MinutesDistributionResponse(BaseModel):
     season: int
     max_league_games: int
     max_league_minutes: int
-    young_max_age: int
-    prime_max_age: int
+    zone_shares: ZoneShares
     players: list[MinutesDistributionPlayer]
+
+
+class LeagueClubBand(BaseModel):
+    club: str
+    club_logo: str | None = None
+    total_minutes: int
+    zone_shares: ZoneShares
+
+
+class LeagueMinutesOverviewResponse(BaseModel):
+    """League-wide minutes overview: one row per club, with each club's squad
+    minutes broken down by age band (% of that club's total minutes). Sorted by
+    youth share descending, tie-broken alphabetically by club."""
+
+    league: str
+    season: int
+    max_league_games: int
+    max_league_minutes: int
+    clubs: list[LeagueClubBand]
 
 
 # ── F8: Heatmap ────────────────────────────────────────────────────────────────
@@ -610,3 +678,39 @@ class HeatmapResponse(BaseModel):
     points: list[HeatmapPoint]
     n_points: int
     max_count: int
+
+
+# ── Squad value (team economic/demographic aggregates) ─────────────────────────
+
+
+class SquadValueTeamRow(BaseModel):
+    """Squad-level aggregates for one club in one season."""
+
+    club: str
+    club_logo: str | None = None
+    league: str | None = None
+    n_players: int
+    avg_age: float | None = None
+    total_xtv_eur: float | None = None
+    avg_xtv_eur: float | None = None
+    total_market_value_eur: float | None = None
+    avg_market_value_eur: float | None = None
+    foreign_share: float | None = Field(
+        default=None,
+        description="Share (0-1) of players whose Passport country differs from the modal squad passport.",
+    )
+
+
+class SquadValueLeagueResponse(BaseModel):
+    season: int
+    league: str
+    teams: list[SquadValueTeamRow]
+
+
+class SquadValueHistoryRow(SquadValueTeamRow):
+    season: int
+
+
+class SquadValueHistoryResponse(BaseModel):
+    club: str
+    rows: list[SquadValueHistoryRow]

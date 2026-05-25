@@ -11,7 +11,14 @@ import { PLOTLY_APP_CONFIG } from "@/lib/plotly-config";
 
 const Plot = dynamic(() => import("react-plotly.js"), { ssr: false });
 
-export type AgeZone = "young" | "prime" | "veteran";
+export type AgeZone = "youth" | "peak" | "experienced" | "veteran";
+
+/** Inclusive upper bounds matching the backend cutoffs in
+ * ``apps/api/app/routers/team_minutes.py``. Kept in sync manually — there is
+ * no shared constant module for static enums of this kind in the repo. */
+export const YOUTH_MAX_AGE = 22; // age <= 22 → youth
+export const PEAK_MAX_AGE = 28; // age <= 28 → peak
+export const EXPERIENCED_MAX_AGE = 33; // age <= 33 → experienced; > 33 → veteran
 
 export interface SquadScatterPoint {
   wyscout_id?: number | null;
@@ -30,10 +37,6 @@ interface Props {
   league: string | null;
   clubLogoUrl?: string | null;
   season: number;
-  /** Inclusive max age for ``young`` (default 22 → ``age <= 22``). */
-  youngMaxAge: number;
-  /** Inclusive max age for ``prime`` (default 30). */
-  primeMaxAge: number;
   /** Static league denominator from API (max_games × 90), shown on hover. */
   maxLeagueMinutes: number;
   height?: number;
@@ -50,23 +53,28 @@ interface ResolvedPoint {
   player_image_url?: string | null;
 }
 
-const ZONE_COLOR: Record<AgeZone, string> = {
-  young: "#14d1ff",
-  prime: "#00ff41",
+export const ZONE_COLOR: Record<AgeZone, string> = {
+  youth: "#14d1ff",
+  peak: "#00ff41",
+  experienced: "#fb923c",
   veteran: "#fbbf24",
 };
 
 const ZONE_FILL: Record<AgeZone, string> = {
-  young: "rgba(20,209,255,0.07)",
-  prime: "rgba(0,255,65,0.05)",
+  youth: "rgba(20,209,255,0.07)",
+  peak: "rgba(0,255,65,0.05)",
+  experienced: "rgba(251,146,60,0.06)",
   veteran: "rgba(251,191,36,0.07)",
 };
 
-const ZONE_LABEL: Record<AgeZone, string> = {
-  young: "Young",
-  prime: "Prime",
+export const ZONE_LABEL: Record<AgeZone, string> = {
+  youth: "Youth",
+  peak: "Peak",
+  experienced: "Experienced",
   veteran: "Veteran",
 };
+
+export const ZONE_ORDER: AgeZone[] = ["youth", "peak", "experienced", "veteran"];
 
 function shortLabel(name: string, max = 14): string {
   const surname = name.trim().split(/\s+/).pop() ?? name;
@@ -80,11 +88,12 @@ export function SquadAgeMinutesScatter({
   league,
   clubLogoUrl,
   season,
-  youngMaxAge,
-  primeMaxAge,
   maxLeagueMinutes,
   height = 460,
 }: Props) {
+  const youngMaxAge = YOUTH_MAX_AGE;
+  const peakMaxAge = PEAK_MAX_AGE;
+  const expMaxAge = EXPERIENCED_MAX_AGE;
   const router = useRouter();
   const sans = plotlySansFontFamily();
 
@@ -150,7 +159,7 @@ export function SquadAgeMinutesScatter({
         x1: youngMaxAge + 0.5,
         y0: 0,
         y1: 1,
-        fillcolor: ZONE_FILL.young,
+        fillcolor: ZONE_FILL.youth,
         line: { width: 0 },
         layer: "below",
       },
@@ -159,10 +168,10 @@ export function SquadAgeMinutesScatter({
         xref: "x",
         yref: "paper",
         x0: youngMaxAge + 0.5,
-        x1: primeMaxAge + 0.5,
+        x1: peakMaxAge + 0.5,
         y0: 0,
         y1: 1,
-        fillcolor: ZONE_FILL.prime,
+        fillcolor: ZONE_FILL.peak,
         line: { width: 0 },
         layer: "below",
       },
@@ -170,7 +179,19 @@ export function SquadAgeMinutesScatter({
         type: "rect",
         xref: "x",
         yref: "paper",
-        x0: primeMaxAge + 0.5,
+        x0: peakMaxAge + 0.5,
+        x1: expMaxAge + 0.5,
+        y0: 0,
+        y1: 1,
+        fillcolor: ZONE_FILL.experienced,
+        line: { width: 0 },
+        layer: "below",
+      },
+      {
+        type: "rect",
+        xref: "x",
+        yref: "paper",
+        x0: expMaxAge + 0.5,
         x1: xMax + 0.5,
         y0: 0,
         y1: 1,
@@ -190,38 +211,48 @@ export function SquadAgeMinutesScatter({
         layer: "below",
       },
     ],
-    [xMin, xMax, youngMaxAge, primeMaxAge, maxLeagueMinutes],
+    [xMin, xMax, youngMaxAge, peakMaxAge, expMaxAge, maxLeagueMinutes],
   );
 
   const annotations: NonNullable<Layout["annotations"]> = React.useMemo(() => {
-    const youngMid = (xMin - 0.5 + youngMaxAge + 0.5) / 2;
-    const primeMid = (youngMaxAge + 0.5 + primeMaxAge + 0.5) / 2;
-    const vetMid = (primeMaxAge + 0.5 + xMax + 0.5) / 2;
+    const youthMid = (xMin - 0.5 + youngMaxAge + 0.5) / 2;
+    const peakMid = (youngMaxAge + 0.5 + peakMaxAge + 0.5) / 2;
+    const expMid = (peakMaxAge + 0.5 + expMaxAge + 0.5) / 2;
+    const vetMid = (expMaxAge + 0.5 + xMax + 0.5) / 2;
     return [
       {
         xref: "x",
         yref: "paper",
-        x: youngMid,
+        x: youthMid,
         y: 1.04,
-        text: `${ZONE_LABEL.young} (≤${youngMaxAge})`,
+        text: `${ZONE_LABEL.youth} (<${youngMaxAge + 1})`,
         showarrow: false,
-        font: { family: sans, size: 11, color: ZONE_COLOR.young },
+        font: { family: sans, size: 11, color: ZONE_COLOR.youth },
       },
       {
         xref: "x",
         yref: "paper",
-        x: primeMid,
+        x: peakMid,
         y: 1.04,
-        text: `${ZONE_LABEL.prime} (${youngMaxAge + 1}–${primeMaxAge})`,
+        text: `${ZONE_LABEL.peak} (${youngMaxAge + 1}–${peakMaxAge})`,
         showarrow: false,
-        font: { family: sans, size: 11, color: ZONE_COLOR.prime },
+        font: { family: sans, size: 11, color: ZONE_COLOR.peak },
+      },
+      {
+        xref: "x",
+        yref: "paper",
+        x: expMid,
+        y: 1.04,
+        text: `${ZONE_LABEL.experienced} (${peakMaxAge + 1}–${expMaxAge})`,
+        showarrow: false,
+        font: { family: sans, size: 11, color: ZONE_COLOR.experienced },
       },
       {
         xref: "x",
         yref: "paper",
         x: vetMid,
         y: 1.04,
-        text: `${ZONE_LABEL.veteran} (>${primeMaxAge})`,
+        text: `${ZONE_LABEL.veteran} (≥${expMaxAge + 1})`,
         showarrow: false,
         font: { family: sans, size: 11, color: ZONE_COLOR.veteran },
       },
@@ -237,7 +268,7 @@ export function SquadAgeMinutesScatter({
         font: { family: sans, size: 9, color: "#7e8fa5" },
       },
     ];
-  }, [xMin, xMax, youngMaxAge, primeMaxAge, maxLeagueMinutes, sans]);
+  }, [xMin, xMax, youngMaxAge, peakMaxAge, expMaxAge, maxLeagueMinutes, sans]);
 
   const layout = React.useMemo<Partial<Layout>>(
     () => ({

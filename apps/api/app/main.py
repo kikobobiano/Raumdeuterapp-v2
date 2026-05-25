@@ -18,6 +18,7 @@ from app.routers import (
     scatter,
     screener,
     team_minutes,
+    team_squad_value,
     teams,
     translation,
 )
@@ -54,6 +55,7 @@ app.include_router(bar_ranking.router)
 app.include_router(translation.router)
 app.include_router(teams.router)
 app.include_router(team_minutes.router)
+app.include_router(team_squad_value.router)
 app.include_router(potential.router)
 app.include_router(heatmap.router)
 

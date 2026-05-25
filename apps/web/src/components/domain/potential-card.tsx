@@ -40,7 +40,8 @@ export function PotentialCard({ data, onClick }: Props) {
 
   const logo = data.clubLogo && !logoFailed ? wyscoutClubLogoSrc(data.clubLogo) : null;
   const potColor = potentialDotColor(data.potentialScore);
-  const pi = data.currentPi ?? 0;
+  const piRaw = (data.minutes ?? 0) > 500 ? (data.currentPi ?? null) : null;
+  const pi = piRaw ?? 0;
   const gap = Math.max(0, data.potentialScore - pi);
 
   return (
@@ -145,11 +146,15 @@ export function PotentialCard({ data, onClick }: Props) {
                 Age {data.age ?? "—"} · {data.minutes ?? 0}&apos;
               </span>
               <span>
-                <span style={{ color: PRIMARY }}>PI {pi.toFixed(1)}</span>
-                <span className="mx-1 opacity-60">→</span>
-                <span style={{ color: potColor }}>
-                  +{gap.toFixed(1)}
-                </span>
+                {piRaw != null ? (
+                  <>
+                    <span style={{ color: PRIMARY }}>PI {pi.toFixed(1)}</span>
+                    <span className="mx-1 opacity-60">→</span>
+                    <span style={{ color: potColor }}>+{gap.toFixed(1)}</span>
+                  </>
+                ) : (
+                  <span className="opacity-40">PI —</span>
+                )}
               </span>
             </div>
           </div>

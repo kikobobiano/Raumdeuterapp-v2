@@ -130,7 +130,7 @@ export function ProfileProgressionPanel({
 
   return (
     <ExportSection
-      id="progression"
+      id="metric-progression"
       label="Progression"
       defaultIncluded={false}
       disabled={!open}

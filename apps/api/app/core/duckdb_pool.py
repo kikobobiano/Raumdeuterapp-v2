@@ -94,11 +94,38 @@ def _register_views(conn: duckdb.DuckDBPyConnection) -> None:
             )
 
 
+def _list_views_unlocked(conn: duckdb.DuckDBPyConnection) -> list[str]:
+    rows = conn.execute(
+        "SELECT table_name FROM information_schema.tables "
+        "WHERE table_type='VIEW' ORDER BY table_name"
+    ).fetchall()
+    return [r[0] for r in rows]
+
+
+def _heatmap_views_missing(conn: duckdb.DuckDBPyConnection) -> bool:
+    """True when heatmap parquets exist on disk but DuckDB views were not registered."""
+    heatmaps_dir = settings.data_dir / "players" / "heatmaps"
+    if not heatmaps_dir.is_dir():
+        return False
+    registered = set(_list_views_unlocked(conn))
+    for f in heatmaps_dir.glob("heatmaps_*.parquet"):
+        try:
+            year = int(f.stem.split("_")[1])
+        except (IndexError, ValueError):
+            continue
+        if f"heatmaps_{year}" not in registered:
+            return True
+    return False
+
+
 def _ensure_conn_unlocked() -> duckdb.DuckDBPyConnection:
     global _conn
     if _conn is None:
         _conn = duckdb.connect(":memory:", read_only=False)
         _conn.execute("PRAGMA threads=4")
+        _register_views(_conn)
+    elif _heatmap_views_missing(_conn):
+        # Parquets added (or view registration restored) after first connect — e.g. post git restore.
         _register_views(_conn)
     return _conn
 
@@ -131,11 +158,7 @@ def fetch_all_dicts(
 def list_views() -> list[str]:
     with _rlock:
         c = _ensure_conn_unlocked()
-        rows = c.execute(
-            "SELECT table_name FROM information_schema.tables "
-            "WHERE table_type='VIEW' ORDER BY table_name"
-        ).fetchall()
-    return [r[0] for r in rows]
+        return _list_views_unlocked(c)
 
 
 def list_seasons() -> list[int]:
