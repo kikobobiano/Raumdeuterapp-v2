@@ -901,6 +901,16 @@ export interface components {
              */
             weight: number;
         };
+        /**
+         * CompositeScoreCriterion
+         * @description Filter on the computed composite score (not a parquet column).
+         */
+        CompositeScoreCriterion: {
+            /** Operator */
+            operator: string;
+            /** Value */
+            value: number;
+        };
         /** DiscoverClusterSummary */
         DiscoverClusterSummary: {
             /** Cluster Id */
@@ -1805,6 +1815,7 @@ export interface components {
             criteria?: components["schemas"]["ScreenerCriterion"][];
             /** Composite */
             composite?: components["schemas"]["CompositeComponent"][];
+            composite_criteria?: components["schemas"]["CompositeScoreCriterion"] | null;
             /**
              * Sort By Composite
              * @default false

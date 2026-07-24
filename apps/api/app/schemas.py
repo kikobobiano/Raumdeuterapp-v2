@@ -116,6 +116,13 @@ class CompositeComponent(BaseModel):
     weight: float = 1.0
 
 
+class CompositeScoreCriterion(BaseModel):
+    """Filter on the computed composite score (not a parquet column)."""
+
+    operator: str = Field(..., pattern=r"^(>=|<=|>|<|=|!=)$")
+    value: float
+
+
 class ScreenerRequest(BaseModel):
     filters: PlayerFilters
     seasons: list[int] = Field(
@@ -125,6 +132,7 @@ class ScreenerRequest(BaseModel):
     )
     criteria: list[ScreenerCriterion] = Field(default_factory=list)
     composite: list[CompositeComponent] = Field(default_factory=list, max_length=8)
+    composite_criteria: CompositeScoreCriterion | None = None
     sort_by_composite: bool = False
     sort_by: str | None = None
     sort_mode: MetricModeLiteral = "as_is"

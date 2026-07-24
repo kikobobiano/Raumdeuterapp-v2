@@ -28,6 +28,24 @@ def _validate_metrics(req: ScreenerRequest, allowed: set[str]) -> None:
             raise HTTPException(400, f"Unknown or unavailable metric: {comp.metric}")
 
 
+def _score_matches(score: float | None, operator: str, value: float) -> bool:
+    if score is None:
+        return False
+    if operator == ">=":
+        return score >= value
+    if operator == "<=":
+        return score <= value
+    if operator == ">":
+        return score > value
+    if operator == "<":
+        return score < value
+    if operator == "=":
+        return score == value
+    if operator == "!=":
+        return score != value
+    return False
+
+
 def _criteria_sql(req: ScreenerRequest) -> tuple[str, list]:
     parts: list[str] = []
     params: list = []
@@ -139,6 +157,9 @@ def screener(req: ScreenerRequest) -> ScreenerResponse:
     except ValueError as e:
         raise HTTPException(404, f"season {e} not loaded") from e
 
+    if req.composite_criteria is not None and not req.composite:
+        raise HTTPException(400, "composite_criteria requires composite components")
+
     with duckdb_session() as conn:
         allowed = _allowed_metrics_intersection(conn, effective)
         _validate_metrics(req, allowed)
@@ -149,7 +170,7 @@ def screener(req: ScreenerRequest) -> ScreenerResponse:
                 (c.metric, c.mode, c.basis, c.weight) for c in req.composite
             ]
             criteria_metrics = [(c.metric, c.mode) for c in req.criteria]
-            records, total, metric_aliases = fetch_screener_candidates(
+            records, _raw_total, metric_aliases = fetch_screener_candidates(
                 conn,
                 seasons=effective,
                 filters=req.filters,
@@ -168,6 +189,14 @@ def screener(req: ScreenerRequest) -> ScreenerResponse:
                 metric_aliases=metric_aliases,
             )
             indexed = list(zip(composites, records, strict=True))
+            if req.composite_criteria is not None:
+                cc = req.composite_criteria
+                indexed = [
+                    item
+                    for item in indexed
+                    if _score_matches(item[0], cc.operator, cc.value)
+                ]
+            total = len(indexed)
 
             def sort_key(item: tuple[float | None, dict]) -> tuple:
                 comp, rec = item

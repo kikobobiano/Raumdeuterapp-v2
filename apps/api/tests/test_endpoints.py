@@ -483,6 +483,57 @@ def test_screener_composite_smoke() -> None:
             assert scores == sorted(scores, reverse=True)
 
 
+def test_screener_composite_criteria_smoke() -> None:
+    with TestClient(app) as c:
+        seasons = c.get("/meta/seasons").json()
+        if not seasons:
+            return
+        season = seasons[0]
+        leagues = c.get(f"/meta/leagues?season={season}").json()
+        filters: dict = {"season": season, "minutes_min": 600}
+        if leagues:
+            filters["leagues"] = [leagues[0]]
+        base = {
+            "filters": filters,
+            "criteria": [],
+            "composite": [
+                {"metric": "Goals", "mode": "p90", "basis": "value", "weight": 1.0},
+            ],
+            "sort_by_composite": True,
+            "sort_desc": True,
+            "limit": 50,
+        }
+        r_all = c.post("/screener", json=base)
+        assert r_all.status_code == 200, r_all.text
+        total_all = r_all.json()["total"]
+
+        r_filt = c.post(
+            "/screener",
+            json={
+                **base,
+                "composite_criteria": {"operator": ">=", "value": 0.0},
+            },
+        )
+        assert r_filt.status_code == 200, r_filt.text
+        data = r_filt.json()
+        assert data["total"] <= total_all
+        for row in data["rows"]:
+            assert row["composite"] is not None
+            assert row["composite"] >= 0.0
+
+        r_bad = c.post(
+            "/screener",
+            json={
+                "filters": filters,
+                "criteria": [],
+                "composite": [],
+                "composite_criteria": {"operator": ">=", "value": 0.5},
+                "limit": 5,
+            },
+        )
+        assert r_bad.status_code == 400
+
+
 def test_heatmap_smoke() -> None:
     with TestClient(app) as c:
         seasons = c.get("/meta/seasons").json()
