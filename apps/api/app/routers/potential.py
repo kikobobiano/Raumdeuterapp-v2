@@ -16,6 +16,7 @@ from app.core.duckdb_pool import duckdb_session, fetch_all_dicts, list_views
 from app.core.filters import (
     not_goalkeeper_sql,
     role_filter_tokens,
+    role_position_regex,
     view_name,
 )
 from app.core.metrics_catalog import column_names_in_view
@@ -65,8 +66,8 @@ def potential(req: PotentialRequest) -> PotentialResponse:
 
     if f.roles:
         tokens = role_filter_tokens(f.roles)
-        if tokens:
-            pattern = "(" + "|".join(sorted(tokens, key=len, reverse=True)) + ")"
+        pattern = role_position_regex(tokens)
+        if pattern:
             parts.append(
                 'regexp_matches(coalesce(p."Primary position", p."Position", \'\'), ?)'
             )
@@ -167,8 +168,8 @@ def _build_cohort_where(
 
     if f.roles:
         tokens = role_filter_tokens(f.roles)
-        if tokens:
-            pattern = "(" + "|".join(sorted(tokens, key=len, reverse=True)) + ")"
+        pattern = role_position_regex(tokens)
+        if pattern:
             parts.append(
                 'regexp_matches(coalesce(p."Primary position", p."Position", \'\'), ?)'
             )

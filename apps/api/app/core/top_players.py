@@ -34,6 +34,7 @@ def top_by_performance_index(
     offset: int = 0,
     logo_season: int,
     leagues: list[str] | None = None,
+    teams: list[str] | None = None,
     roles: list[str] | None = None,
     age_min: int | None = None,
     age_max: int | None = None,
@@ -54,19 +55,22 @@ def top_by_performance_index(
     if leagues:
         where_parts.append(f"league IN ({','.join(['?'] * len(leagues))})")
         params.extend(leagues)
+    if teams:
+        where_parts.append(f"club IN ({','.join(['?'] * len(teams))})")
+        params.extend(teams)
     if age_min is not None:
-        where_parts.append("Age >= ?")
+        where_parts.append(f"({age_sel}) >= ?")
         params.append(age_min)
     if age_max is not None:
-        where_parts.append("Age <= ?")
+        where_parts.append(f"({age_sel}) <= ?")
         params.append(age_max)
 
     if roles:
-        from app.core.filters import role_filter_tokens
+        from app.core.filters import role_filter_tokens, role_position_regex
 
         tokens = role_filter_tokens(roles)
-        if tokens:
-            pattern = "(" + "|".join(sorted(tokens, key=len, reverse=True)) + ")"
+        pattern = role_position_regex(tokens)
+        if pattern:
             where_parts.append(
                 'regexp_matches(coalesce("Primary position", Position, \'\'), ?)'
             )

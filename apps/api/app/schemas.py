@@ -106,9 +106,26 @@ class ScreenerCriterion(BaseModel):
     value: float
 
 
+CompositeBasisLiteral = Literal["value", "team_median"]
+
+
+class CompositeComponent(BaseModel):
+    metric: str
+    mode: MetricModeLiteral = "as_is"
+    basis: CompositeBasisLiteral = "value"
+    weight: float = 1.0
+
+
 class ScreenerRequest(BaseModel):
     filters: PlayerFilters
+    seasons: list[int] = Field(
+        default_factory=list,
+        max_length=8,
+        description="Optional multi-season set. Empty → filters.season only.",
+    )
     criteria: list[ScreenerCriterion] = Field(default_factory=list)
+    composite: list[CompositeComponent] = Field(default_factory=list, max_length=8)
+    sort_by_composite: bool = False
     sort_by: str | None = None
     sort_mode: MetricModeLiteral = "as_is"
     sort_desc: bool = True
@@ -117,6 +134,7 @@ class ScreenerRequest(BaseModel):
 
 
 class ScreenerRow(BaseModel):
+    season: int
     wyscout_id: int | None
     club_logo: str | None = None
     player: str
@@ -126,6 +144,7 @@ class ScreenerRow(BaseModel):
     age: int | None
     minutes: int | None
     metrics: dict[str, float | None]
+    composite: float | None = None
 
 
 class ScreenerResponse(BaseModel):
@@ -639,6 +658,11 @@ class MinutesDistributionResponse(BaseModel):
     max_league_games: int
     max_league_minutes: int
     zone_shares: ZoneShares
+    domestic_only: bool = False
+    domestic_country: str | None = Field(
+        default=None,
+        description="Primary domestic passport label for this league (e.g. England).",
+    )
     players: list[MinutesDistributionPlayer]
 
 
@@ -658,7 +682,175 @@ class LeagueMinutesOverviewResponse(BaseModel):
     season: int
     max_league_games: int
     max_league_minutes: int
+    domestic_only: bool = False
+    domestic_country: str | None = None
     clubs: list[LeagueClubBand]
+
+
+class LeagueMedianBand(BaseModel):
+    """Median squad age-band shares across clubs in one league."""
+
+    league: str
+    n_clubs: int
+    median_zone_shares: ZoneShares
+
+
+class LeaguesMinutesOverviewResponse(BaseModel):
+    """Cross-league overview: one row per league with median zone shares across
+    its clubs. Sorted by ``sort_by`` band descending, tie-broken alphabetically."""
+
+    season: int
+    sort_by: AgeBand
+    domestic_only: bool = False
+    leagues: list[LeagueMedianBand]
+
+
+# ── Scouting: Discover ────────────────────────────────────────────────────────
+
+
+CohortTierLiteral = Literal["position_tier", "position_league", "position_global"]
+NormalizationLiteral = Literal["zscore", "percentile"]
+ArchetypeLiteral = Literal["pca_kmeans", "none"]
+
+
+class ScoutingMetricSpec(BaseModel):
+    metric: str
+    mode: MetricModeLiteral = "as_is"
+    weight: float = 1.0
+    threshold_z: float | None = None
+
+
+class DiscoverRequest(BaseModel):
+    filters: PlayerFilters
+    metrics: list[ScoutingMetricSpec] = Field(..., min_length=1, max_length=20)
+    normalization: NormalizationLiteral = "zscore"
+    cohort_tier: CohortTierLiteral = "position_tier"
+    archetype: ArchetypeLiteral = "pca_kmeans"
+    k_clusters: int = Field(4, ge=2, le=8)
+    club_fit_team: str | None = None
+    club_fit_weight: float = Field(0.3, ge=0.0, le=1.0)
+    limit: int = Field(50, ge=1, le=500)
+    offset: int = Field(0, ge=0, le=10_000)
+
+
+class DiscoverMetricValue(BaseModel):
+    metric: str
+    value: float | None
+    z: float | None
+    percentile: float | None = None
+
+
+class DiscoverRow(BaseModel):
+    wyscout_id: int | None
+    player: str
+    club: str | None
+    club_logo: str | None = None
+    league: str | None
+    position: str | None
+    age: int | None
+    minutes: int | None
+    height: int | None = None
+    foot: str | None = None
+    passport_country: str | None = None
+    contract_expires: str | None = None
+    x_tv_eur: float | None = None
+    player_image_url: str | None = None
+    composite_score: float
+    style_fit: float | None = None
+    cluster_id: int | None = None
+    pca_x: float | None = None
+    pca_y: float | None = None
+    pca_z: float | None = None
+    metric_values: list[DiscoverMetricValue]
+
+
+class DiscoverClusterSummary(BaseModel):
+    cluster_id: int
+    label: str
+    n_members: int
+
+
+class DiscoverCohortInfo(BaseModel):
+    n: int
+    tier_used: CohortTierLiteral
+    min_minutes: int
+    fallback_applied: bool = False
+
+
+class DiscoverPCAInfo(BaseModel):
+    explained_variance: list[float]
+    loadings: list[list[float]]
+
+
+class DiscoverResponse(BaseModel):
+    rows: list[DiscoverRow]
+    total: int
+    cohort: DiscoverCohortInfo
+    pca: DiscoverPCAInfo | None = None
+    clusters: list[DiscoverClusterSummary] = Field(default_factory=list)
+    silhouette: float | None = None
+    metric_labels: dict[str, str] = Field(default_factory=dict)
+
+
+# ── Scouting: Standouts ────────────────────────────────────────────────────────
+
+
+StandoutSignalLiteral = Literal["overall", "metrics"]
+
+
+class StandoutRequest(BaseModel):
+    filters: PlayerFilters
+    signal: StandoutSignalLiteral = "overall"
+    metrics: list[ScoutingMetricSpec] = Field(default_factory=list, max_length=20)
+    min_standout_z: float = Field(
+        1.0,
+        ge=0.0,
+        le=4.0,
+        description="Keep players at least this many σ above the league average.",
+    )
+    limit: int = Field(50, ge=1, le=200)
+
+    @model_validator(mode="after")
+    def _metrics_present(self) -> "StandoutRequest":
+        if self.signal == "metrics" and not self.metrics:
+            raise ValueError("signal='metrics' requires at least one metric.")
+        return self
+
+
+class StandoutDimension(BaseModel):
+    key: str
+    label: str
+    value: float | None
+    z: float | None
+    percentile: float | None = None
+
+
+class StandoutRow(BaseModel):
+    wyscout_id: int | None
+    player: str
+    club: str | None
+    club_logo: str | None = None
+    league: str | None
+    position: str | None
+    age: int | None
+    minutes: int | None
+    player_image_url: str | None = None
+    performance_index: float | None = None
+    standout_score: float
+    dimensions: list[StandoutDimension] = Field(default_factory=list)
+
+
+class StandoutResponse(BaseModel):
+    rows: list[StandoutRow]
+    total: int
+    league: str | None = None
+    cohort_n: int
+    min_minutes: int
+    signal: StandoutSignalLiteral
+    distribution: list[float] = Field(default_factory=list)
+    league_mean: float | None = None
+    league_sd: float | None = None
+    metric_labels: dict[str, str] = Field(default_factory=dict)
 
 
 # ── F8: Heatmap ────────────────────────────────────────────────────────────────
@@ -699,11 +891,27 @@ class SquadValueTeamRow(BaseModel):
         default=None,
         description="Share (0-1) of players whose Passport country differs from the modal squad passport.",
     )
+    n_players_500: int = Field(
+        default=0,
+        description="Players with at least 500 minutes (quality cohort for PI / xTV z-score).",
+    )
+    avg_performance_index: float | None = Field(
+        default=None,
+        description="Mean performance_index among players with >= 500 minutes.",
+    )
+    squad_xtv_zscore: float | None = Field(
+        default=None,
+        description="Z-score of total squad xTV (500+ min cohort) vs league mean.",
+    )
 
 
 class SquadValueLeagueResponse(BaseModel):
     season: int
     league: str
+    xtv_supported: bool = Field(
+        default=True,
+        description="False when xTV is not offered for this league (e.g. Campeonato de Portugal).",
+    )
     teams: list[SquadValueTeamRow]
 
 
@@ -713,4 +921,8 @@ class SquadValueHistoryRow(SquadValueTeamRow):
 
 class SquadValueHistoryResponse(BaseModel):
     club: str
+    xtv_supported: bool = Field(
+        default=True,
+        description="False when the club has no xTV-eligible seasons in the response.",
+    )
     rows: list[SquadValueHistoryRow]

@@ -1,5 +1,19 @@
+const MAX_LEAGUES_IN_SUBTITLE = 5;
+
 function normSortUnique(arr: readonly string[]): string[] {
   return [...new Set(arr)].sort((a, b) => a.localeCompare(b));
+}
+
+/** Comma list, capped at ``MAX_LEAGUES_IN_SUBTITLE`` then ``+ N leagues``. */
+function formatLeagueNameList(leagues: readonly string[]): string {
+  const sorted = normSortUnique(leagues);
+  if (sorted.length <= MAX_LEAGUES_IN_SUBTITLE) {
+    return sorted.join(", ");
+  }
+  const visible = sorted.slice(0, MAX_LEAGUES_IN_SUBTITLE);
+  const rest = sorted.length - MAX_LEAGUES_IN_SUBTITLE;
+  const suffix = rest === 1 ? "league" : "leagues";
+  return `${visible.join(", ")} + ${rest} ${suffix}`;
 }
 
 function sameSortedSet(a: readonly string[], b: readonly string[]): boolean {
@@ -44,8 +58,8 @@ export function formatLeaguesFilterLabel(
     sameSortedSet(selBig, bigInScope) &&
     selNonBig.length > 0
   ) {
-    return `Big 5, ${normSortUnique(selNonBig).join(", ")}`;
+    return `Big 5, ${formatLeagueNameList(selNonBig)}`;
   }
 
-  return normSortUnique(selectedLeagues).join(", ");
+  return formatLeagueNameList(selectedLeagues);
 }

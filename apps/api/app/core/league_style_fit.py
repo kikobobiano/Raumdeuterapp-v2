@@ -224,6 +224,69 @@ def _qident(name: str) -> str:
     return f'"{name}"'
 
 
+def compute_team_style_fit(
+    *,
+    player: Mapping[str, Any],
+    profiles: pd.DataFrame,
+    target_team: str,
+    season: int,
+) -> float | None:
+    """Cosine similarity of player style vector vs a single team's centroid.
+
+    Z-scoring is computed across ALL teams in ``profiles`` for the season — so
+    a player who matches the target team well *relative to the league pool*
+    scores high. Returns None when data is missing.
+    """
+    if profiles is None or profiles.empty:
+        return None
+    pool = profiles[profiles["season"] == int(season)].copy()
+    if pool.empty:
+        return None
+    raw_cols = [f"{d}_raw" for d in STYLE_FEATURES]
+    if not all(c in pool.columns for c in raw_cols):
+        return None
+
+    p_raw = player_raw_style_vector(player)
+
+    mu: dict[str, float] = {}
+    sd: dict[str, float] = {}
+    for d in STYLE_FEATURES:
+        col = f"{d}_raw"
+        vals = pd.to_numeric(pool[col], errors="coerce")
+        mu[d] = float(vals.mean(skipna=True)) if vals.notna().any() else 0.0
+        s = float(vals.std(ddof=0, skipna=True)) if vals.notna().sum() > 1 else 0.0
+        sd[d] = s if np.isfinite(s) and s >= 1e-12 else 0.0
+
+    def zvec(raw: MutableMapping[str, float] | pd.Series) -> np.ndarray:
+        out = np.zeros(len(STYLE_FEATURES), dtype=float)
+        for i, d in enumerate(STYLE_FEATURES):
+            src = raw.get(d, np.nan) if isinstance(raw, dict) else raw.get(d, np.nan)
+            v = float(src) if pd.notna(src) else float("nan")
+            if not np.isfinite(v):
+                continue
+            if sd[d] < 1e-12:
+                out[i] = 0.0
+            else:
+                out[i] = (v - mu[d]) / sd[d]
+        return out
+
+    team_rows = pool[pool["team"] == target_team] if "team" in pool.columns else pd.DataFrame()
+    if team_rows.empty and "club" in pool.columns:
+        team_rows = pool[pool["club"] == target_team]
+    if team_rows.empty:
+        return None
+
+    cen: dict[str, float] = {}
+    for d in STYLE_FEATURES:
+        col = f"{d}_raw"
+        vals = pd.to_numeric(team_rows[col], errors="coerce")
+        cen[d] = float(vals.mean(skipna=True)) if vals.notna().any() else float("nan")
+
+    pz = zvec(p_raw)
+    cz = zvec(cen)
+    return _cosine(pz, cz)
+
+
 def translation_style_fit_rows(
     conn: Any,
     *,

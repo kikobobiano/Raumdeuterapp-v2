@@ -331,11 +331,12 @@ def best_xi(req: BestXIRequest) -> BestXIResponse:
         if f.leagues:
             where_parts.append(f"league IN ({','.join(['?'] * len(f.leagues))})")
             params.extend(f.leagues)
+        age_sel = player_age_sql(cols_in_view, req.filters.season)
         if f.age_min is not None:
-            where_parts.append("Age >= ?")
+            where_parts.append(f"({age_sel}) >= ?")
             params.append(f.age_min)
         if f.age_max is not None:
-            where_parts.append("Age <= ?")
+            where_parts.append(f"({age_sel}) <= ?")
             params.append(f.age_max)
         if f.minutes_min is not None:
             where_parts.append('"Minutes played" >= ?')
@@ -359,7 +360,6 @@ def best_xi(req: BestXIRequest) -> BestXIResponse:
         where_parts.append("performance_index IS NOT NULL")
         where = "WHERE " + " AND ".join(where_parts)
 
-        age_sel = player_age_sql(cols_in_view, req.filters.season)
         select_cols = ", ".join(
             [
                 '"Wyscout id" AS wyscout_id',

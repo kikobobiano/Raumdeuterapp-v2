@@ -28,6 +28,9 @@ from app.core.duckdb_pool import (
 from app.core.filters import view_name
 from app.core.metrics_catalog import column_names_in_view
 from app.core.player_age import player_age_sql
+from app.core.config import LEAGUES_EXCLUDED_FROM_SQUAD_VALUE
+from app.core.squad_value import merge_quality_metrics, quality_aggregate_sql
+from app.core.xtv_eligibility import league_supports_xtv, xtv_parquet_sql
 from app.schemas import (
     SquadValueHistoryResponse,
     SquadValueHistoryRow,
@@ -36,6 +39,11 @@ from app.schemas import (
 )
 
 router = APIRouter(prefix="/teams", tags=["teams"])
+
+
+def _reject_excluded_squad_value_league(league: str) -> None:
+    if league.strip() in LEAGUES_EXCLUDED_FROM_SQUAD_VALUE:
+        raise HTTPException(404, "Squad value is not available for this league")
 
 
 def _to_float(v: Any) -> float | None:
@@ -68,9 +76,7 @@ def _aggregate_sql(view: str, cols: set[str], logo_sql: str, age_expr: str) -> s
     or club). Columns coalesce safely when a parquet lacks ``x_tv_eur``,
     ``tm_market_value_eur``, or ``Passport country`` (legacy seasons).
     """
-    xtv_expr = (
-        'CAST("x_tv_eur" AS DOUBLE)' if "x_tv_eur" in cols else "CAST(NULL AS DOUBLE)"
-    )
+    xtv_expr = xtv_parquet_sql(cols)
     mv_expr = (
         'CAST("tm_market_value_eur" AS DOUBLE)'
         if "tm_market_value_eur" in cols
@@ -137,6 +143,9 @@ def _row_to_team(rec: dict[str, Any]) -> SquadValueTeamRow:
         total_market_value_eur=_to_float(rec.get("total_mv_eur")),
         avg_market_value_eur=_to_float(rec.get("avg_mv_eur")),
         foreign_share=_to_float(rec.get("foreign_share")),
+        n_players_500=_to_int(rec.get("n_players_500")) or 0,
+        avg_performance_index=_to_float(rec.get("avg_performance_index")),
+        squad_xtv_zscore=_to_float(rec.get("squad_xtv_zscore")),
     )
 
 
@@ -148,6 +157,7 @@ def squad_value_league(
     view = view_name(season)
     if view not in list_views():
         raise HTTPException(404, f"season {season} not loaded")
+    _reject_excluded_squad_value_league(league)
 
     with duckdb_session() as conn:
         cols = column_names_in_view(conn, view)
@@ -162,6 +172,9 @@ def squad_value_league(
             extra_where="AND league = ?"
         )
         rows = fetch_all_dicts(conn, sql, [league])
+        quality_sql = quality_aggregate_sql(view, cols)
+        quality_rows = fetch_all_dicts(conn, quality_sql, [league])
+        merge_quality_metrics(rows, quality_rows)
 
     if not rows:
         raise HTTPException(
@@ -169,7 +182,12 @@ def squad_value_league(
         )
 
     teams = [_row_to_team(r) for r in rows]
-    return SquadValueLeagueResponse(season=season, league=league, teams=teams)
+    return SquadValueLeagueResponse(
+        season=season,
+        league=league,
+        xtv_supported=league_supports_xtv(league),
+        teams=teams,
+    )
 
 
 @router.get("/squad-value/history", response_model=SquadValueHistoryResponse)
@@ -212,4 +230,11 @@ def squad_value_history(
     if not out:
         raise HTTPException(404, f"No squad data for club {club!r}")
 
-    return SquadValueHistoryResponse(club=club, rows=out)
+    if any(
+        r.league and r.league.strip() in LEAGUES_EXCLUDED_FROM_SQUAD_VALUE
+        for r in out
+    ):
+        raise HTTPException(404, "Squad value is not available for this league")
+
+    xtv_ok = any(league_supports_xtv(r.league) for r in out)
+    return SquadValueHistoryResponse(club=club, xtv_supported=xtv_ok, rows=out)

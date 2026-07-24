@@ -52,22 +52,29 @@ def role_tokens() -> dict[str, list[str]]:
 
 
 @router.get("/teams")
-def teams(season: int, league: str | None = None) -> list[str]:
+def teams(
+    season: int,
+    league: str | None = None,
+    leagues: list[str] | None = Query(None),
+) -> list[str]:
+    """Distinct clubs for a season, optionally scoped to one or more leagues.
+
+    ``leagues`` (repeated query param) takes precedence over the legacy single
+    ``league`` param; passing neither returns every club in the season.
+    """
     view = f"players_{season}"
     if view not in list_views():
         raise HTTPException(404, f"season {season} not loaded")
+    picked = leagues if leagues else ([league] if league else [])
+    conds = ["club IS NOT NULL"]
+    params: list[str] = []
+    if picked:
+        conds.append(f"league IN ({','.join(['?'] * len(picked))})")
+        params.extend(picked)
+    sql = f"SELECT DISTINCT club FROM {view} WHERE {' AND '.join(conds)} ORDER BY club"
     with duckdb_session() as conn:
-        if league:
-            rows = conn.execute(
-                f"SELECT DISTINCT club FROM {view} "
-                f"WHERE club IS NOT NULL AND league = ? ORDER BY club",
-                [league],
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                f"SELECT DISTINCT club FROM {view} WHERE club IS NOT NULL ORDER BY club"
-            ).fetchall()
-        return [r[0] for r in rows]
+        rows = conn.execute(sql, params).fetchall()
+    return [r[0] for r in rows]
 
 
 @router.get("/players/top-performance", response_model=TopPerformancePage)
@@ -77,6 +84,7 @@ def players_top_performance(
     limit: int = Query(30, ge=1, le=200),
     offset: int = Query(0, ge=0, description="Paging offset"),
     leagues: list[str] | None = Query(None, description="Filter by leagues"),
+    teams: list[str] | None = Query(None, description="Filter by clubs"),
     roles: list[str] | None = Query(None, description="Filter by tactical roles"),
     age_min: int | None = Query(None, ge=14, le=50),
     age_max: int | None = Query(None, ge=14, le=50),
@@ -96,6 +104,7 @@ def players_top_performance(
             offset=offset,
             logo_season=season,
             leagues=leagues or None,
+            teams=teams or None,
             roles=roles or None,
             age_min=age_min,
             age_max=age_max,

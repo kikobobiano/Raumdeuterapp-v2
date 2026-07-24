@@ -13,6 +13,7 @@ from app.core.duckdb_pool import list_seasons, list_views
 from app.core.metrics_catalog import column_names_in_view
 from app.core.profile_history_row import fetch_one_row_prefer_club
 from app.core.sql_ident import q_ident
+from app.core.xtv_eligibility import league_supports_xtv
 
 _XTV_HISTORY_PREF_COLS = (
     "club",
@@ -69,6 +70,9 @@ def build_xtv_history_payload(
         select_sql = ", ".join(q_ident(c) for c in proj)
         rec = fetch_one_row_prefer_club(conn, view, select_sql, wyscout_id, preferred_club)
         if not rec:
+            continue
+        row_league = rec.get("league")
+        if not league_supports_xtv(str(row_league) if row_league is not None else None):
             continue
         xtv = _xtv_cell(rec)
         if xtv is None:

@@ -145,6 +145,39 @@ def test_player_profile_embeds_pi_history() -> None:
         assert len(pts) <= 5
 
 
+def test_player_profile_table_role_override() -> None:
+    """Compare needs defender metrics on a forward (and vice versa) via table_role."""
+    from app.core.config import ROLE_TABLE_METRICS
+
+    with TestClient(app) as c:
+        seasons = c.get("/meta/seasons").json()
+        if not seasons:
+            return
+        season = seasons[0]
+        rows = c.get(f"/players/search?season={season}&q=salah&limit=1").json()
+        if not rows or rows[0].get("wyscout_id") is None:
+            return
+        wid = rows[0]["wyscout_id"]
+
+        overridden = c.get(
+            f"/players/{wid}/profile",
+            params={"season": season, "table_role": "Defender"},
+        )
+        assert overridden.status_code == 200, overridden.text
+        got = [m["metric"] for m in overridden.json()["table"]]
+        assert got, "expected defender preset rows"
+        assert got[0] == "Minutes played"
+        assert set(got) <= set(ROLE_TABLE_METRICS["Defender"])
+        # Preset metrics present in the parquet must all be returned (order preserved).
+        assert got == [m for m in ROLE_TABLE_METRICS["Defender"] if m in got]
+
+        bad = c.get(
+            f"/players/{wid}/profile",
+            params={"season": season, "table_role": "NotARole"},
+        )
+        assert bad.status_code == 400, bad.text
+
+
 def test_rankings_smoke() -> None:
     with TestClient(app) as c:
         seasons = c.get("/meta/seasons").json()
@@ -328,6 +361,40 @@ def test_minutes_distribution_league_overview() -> None:
             assert 99.0 <= total <= 101.0 or total == 0.0
 
 
+def test_minutes_distribution_all_leagues_overview() -> None:
+    with TestClient(app) as c:
+        seasons = c.get("/meta/seasons").json()
+        if not seasons:
+            return
+        s = max(seasons)
+        for sort_by in ("youth", "peak", "experienced", "veteran"):
+            r = c.get(
+                f"/teams/minutes-distribution/leagues?season={s}&sort_by={sort_by}"
+            )
+            assert r.status_code == 200, r.text
+            body = r.json()
+            assert body["season"] == s
+            assert body["sort_by"] == sort_by
+            assert body["domestic_only"] is False
+            leagues = body["leagues"]
+            assert isinstance(leagues, list) and len(leagues) > 0
+            keys = [
+                (-row["median_zone_shares"][sort_by], row["league"].lower())
+                for row in leagues
+            ]
+            assert keys == sorted(keys)
+            for row in leagues:
+                assert row["n_clubs"] >= 1
+                zs = row["median_zone_shares"]
+                assert all(k in zs for k in ("youth", "peak", "experienced", "veteran"))
+
+        r_dom = c.get(
+            f"/teams/minutes-distribution/leagues?season={s}&domestic_only=true"
+        )
+        assert r_dom.status_code == 200, r_dom.text
+        assert r_dom.json()["domestic_only"] is True
+
+
 def test_screener_smoke() -> None:
     with TestClient(app) as c:
         seasons = c.get("/meta/seasons").json()
@@ -348,6 +415,72 @@ def test_screener_smoke() -> None:
         data = r.json()
         assert "rows" in data
         assert len(data["rows"]) <= 10
+        for row in data["rows"]:
+            assert row["season"] == seasons[0]
+
+
+def test_screener_multi_season_smoke() -> None:
+    with TestClient(app) as c:
+        seasons = c.get("/meta/seasons").json()
+        if len(seasons) < 2:
+            return
+        picked = sorted(seasons[:2])
+        body = {
+            "filters": {"season": picked[-1], "minutes_min": 1000},
+            "seasons": picked,
+            "criteria": [
+                {"metric": "xG", "mode": "p90", "operator": ">=", "value": 0.3},
+            ],
+            "sort_by": "xG",
+            "sort_mode": "p90",
+            "sort_desc": True,
+            "limit": 20,
+        }
+        r = c.post("/screener", json=body)
+        assert r.status_code == 200, r.text
+        data = r.json()
+        assert "rows" in data
+        assert len(data["rows"]) <= 20
+        assert data["total"] >= len(data["rows"])
+        for row in data["rows"]:
+            assert row["season"] in picked
+
+
+def test_screener_composite_smoke() -> None:
+    with TestClient(app) as c:
+        seasons = c.get("/meta/seasons").json()
+        if not seasons:
+            return
+        season = seasons[0]
+        leagues = c.get(f"/meta/leagues?season={season}").json()
+        filters: dict = {"season": season, "minutes_min": 600}
+        if leagues:
+            filters["leagues"] = [leagues[0]]
+        body = {
+            "filters": filters,
+            "criteria": [],
+            "composite": [
+                {"metric": "Goals", "mode": "p90", "basis": "value", "weight": 1.0},
+                {
+                    "metric": "Successful dribbles, %",
+                    "mode": "as_is",
+                    "basis": "team_median",
+                    "weight": 1.0,
+                },
+            ],
+            "sort_by_composite": True,
+            "sort_desc": True,
+            "limit": 10,
+        }
+        r = c.post("/screener", json=body)
+        assert r.status_code == 200, r.text
+        data = r.json()
+        assert "rows" in data
+        for row in data["rows"]:
+            assert row["season"] == season
+        if data["rows"]:
+            scores = [row["composite"] for row in data["rows"] if row["composite"] is not None]
+            assert scores == sorted(scores, reverse=True)
 
 
 def test_heatmap_smoke() -> None:

@@ -6,6 +6,7 @@ import {
   type LucideIcon,
   PanelLeftClose,
   PanelLeftOpen,
+  Search,
   Settings,
   Trophy,
   Users,
@@ -26,6 +27,7 @@ interface NavItem {
 const NAV: NavItem[] = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/scout", label: "Player Scout", icon: Users },
+  { href: "/scouting", label: "Scouting", icon: Search },
   { href: "/teams", label: "Team Metrics", icon: Trophy },
   { href: "/glossary", label: "Glossary", icon: BarChart3 },
 ];

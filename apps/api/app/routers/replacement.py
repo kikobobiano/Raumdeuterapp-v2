@@ -17,7 +17,7 @@ from fastapi import APIRouter, HTTPException
 
 from app.core.config import AREA_INDEX_COLS, GAME_AREAS_COLS
 from app.core.duckdb_pool import duckdb_session, fetch_all_dicts, list_views
-from app.core.filters import PlayerFilters, build_where, view_name
+from app.core.filters import PlayerFilters, age_filter_parts, build_where, view_name
 from app.core.sql_ident import q_ident as _q
 from app.core.club_logos import club_logo_select_sql, normalize_club_logo
 from app.core.metrics_catalog import column_names_in_view
@@ -96,16 +96,23 @@ def _collect_candidate_rows(
     where_sql: str,
     params: list[Any],
     features: list[str],
+    filters: PlayerFilters | None = None,
 ) -> list[dict]:
     feat_cols = ", ".join(_q(c) for c in features)
     out: list[dict] = []
-    where_clause = f"WHERE {where_sql}" if where_sql else ""
     for cs in seasons:
         cand_view = view_name(cs)
         vcols = column_names_in_view(conn, cand_view)
         age_sel = player_age_sql(vcols, cs)
         logo_c = club_logo_select_sql(conn, cand_view, cs)
         img_c = player_image_select_sql(conn, cand_view)
+        parts = [where_sql] if where_sql else []
+        query_params = list(params)
+        if filters is not None:
+            age_parts, age_params = age_filter_parts(filters, vcols, season=cs)
+            parts.extend(age_parts)
+            query_params.extend(age_params)
+        where_clause = f"WHERE {' AND '.join(parts)}" if parts else ""
         cand_sql = f"""
             SELECT "Wyscout id" AS wyscout_id, "Player" AS player, club, league,
                    "Primary position" AS position, ({age_sel}) AS age, "Minutes played" AS minutes,
@@ -115,7 +122,7 @@ def _collect_candidate_rows(
             FROM {cand_view}
             {where_clause}
         """
-        for row in fetch_all_dicts(conn, cand_sql, list(params)):
+        for row in fetch_all_dicts(conn, cand_sql, query_params):
             row["_candidate_season"] = cs
             out.append(row)
     return out
@@ -159,11 +166,13 @@ def replacement(req: ReplacementRequest) -> ReplacementResponse:
         target = target_rows[0]
 
         f = req.candidate_filters
-        narrow_where, narrow_params = build_where(f)
+        ref_view = view_name(f.season)
+        ref_cols = column_names_in_view(conn, ref_view)
+        narrow_where, narrow_params = build_where(f, cols=ref_cols, include_age=False)
 
         widen_leagues_for_norm = bool(f.leagues)
         norm_f = f.model_copy(update={"leagues": None}) if widen_leagues_for_norm else f
-        norm_where, norm_params = build_where(norm_f)
+        norm_where, norm_params = build_where(norm_f, cols=ref_cols, include_age=False)
 
         cand_rows = _collect_candidate_rows(
             conn,
@@ -171,6 +180,7 @@ def replacement(req: ReplacementRequest) -> ReplacementResponse:
             where_sql=narrow_where,
             params=narrow_params,
             features=features,
+            filters=f,
         )
 
         norm_rows = (
@@ -180,6 +190,7 @@ def replacement(req: ReplacementRequest) -> ReplacementResponse:
                 where_sql=norm_where,
                 params=norm_params,
                 features=features,
+                filters=norm_f,
             )
             if widen_leagues_for_norm
             else cand_rows

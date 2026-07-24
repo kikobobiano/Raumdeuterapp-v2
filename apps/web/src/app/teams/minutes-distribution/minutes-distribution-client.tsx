@@ -7,6 +7,7 @@ import * as React from "react";
 import type { components } from "shared-types";
 
 import { ClubLogoImg } from "@/components/domain/club-logo-img";
+import { SeasonSelect } from "@/components/domain/season-select";
 import {
   ExportButton,
   ExportFilterArea,
@@ -30,12 +31,16 @@ import {
   type SquadShareRow,
 } from "@/components/charts/squad-minutes-share-bars";
 import { LeagueZoneSharesBars } from "@/components/charts/league-zone-shares-bars";
+import { AllLeaguesZoneSharesBars } from "@/components/charts/all-leagues-zone-shares-bars";
 import { ZoneSharesStrip } from "@/components/charts/zone-shares-strip";
+import type { AgeZone } from "@/components/charts/squad-age-minutes-scatter";
 
 type Response = components["schemas"]["MinutesDistributionResponse"];
 type Player = components["schemas"]["MinutesDistributionPlayer"];
 type LeagueOverview =
   components["schemas"]["LeagueMinutesOverviewResponse"];
+type AllLeaguesOverview =
+  components["schemas"]["LeaguesMinutesOverviewResponse"];
 
 function pad2(n: number): string {
   return n.toString().padStart(2, "0");
@@ -63,6 +68,14 @@ export function MinutesDistributionClient() {
 
   const league = searchParams.get("league") ?? "";
   const club = searchParams.get("club") ?? "";
+  const sortByParam = searchParams.get("sort") ?? "youth";
+  const sortBy: AgeZone =
+    sortByParam === "peak" ||
+    sortByParam === "experienced" ||
+    sortByParam === "veteran"
+      ? sortByParam
+      : "youth";
+  const domesticOnly = searchParams.get("domestic") === "1";
 
   const updateParams = React.useCallback(
     (updates: Record<string, string | null>) => {
@@ -83,6 +96,12 @@ export function MinutesDistributionClient() {
     updateParams({ league: v || null, club: null });
   };
   const setClub = (v: string) => updateParams({ club: v || null });
+  const setSortBy = (band: AgeZone) =>
+    updateParams({ sort: band === "youth" ? null : band });
+  const setDomesticOnly = (checked: boolean) =>
+    updateParams({ domestic: checked ? "1" : null });
+
+  const domesticQuery = domesticOnly ? { domestic_only: true } : {};
 
   const leaguesQ = useQuery({
     queryKey: ["meta-leagues", f.season],
@@ -113,6 +132,14 @@ export function MinutesDistributionClient() {
 
   const clubs = clubsQ.data ?? [];
 
+  // Drop a stale league param when it no longer exists for this season.
+  React.useEffect(() => {
+    const leagues = leaguesQ.data;
+    if (leaguesQ.isPending || !leagues?.length || !league) return;
+    if (leagues.includes(league)) return;
+    updateParams({ league: null, club: null });
+  }, [league, leaguesQ.data, leaguesQ.isPending, updateParams]);
+
   // Drop an invalid club param when it no longer matches the league filter.
   // Do NOT auto-pick a club when none is set — that hides the league overview.
   React.useEffect(() => {
@@ -124,11 +151,11 @@ export function MinutesDistributionClient() {
 
   const distQ = useQuery({
     enabled: !!club,
-    queryKey: ["team-minutes", f.season, club],
+    queryKey: ["team-minutes", f.season, club, domesticOnly],
     placeholderData: keepPreviousData,
     queryFn: async () => {
       const { data, error } = await api.GET("/teams/minutes-distribution", {
-        params: { query: { season: f.season, club } },
+        params: { query: { season: f.season, club, ...domesticQuery } },
       });
       if (error) throw new Error(JSON.stringify(error));
       return data as Response;
@@ -137,24 +164,46 @@ export function MinutesDistributionClient() {
 
   const leagueOverviewQ = useQuery({
     enabled: !!league && !club,
-    queryKey: ["team-minutes-league", f.season, league],
+    queryKey: ["team-minutes-league", f.season, league, domesticOnly],
     placeholderData: keepPreviousData,
     queryFn: async () => {
       const { data, error } = await api.GET(
         "/teams/minutes-distribution/league",
-        { params: { query: { season: f.season, league } } },
+        { params: { query: { season: f.season, league, ...domesticQuery } } },
       );
       if (error) throw new Error(JSON.stringify(error));
       return data as LeagueOverview;
     },
   });
 
+  const allLeaguesQ = useQuery({
+    enabled: !league && !club,
+    queryKey: ["team-minutes-leagues", f.season, domesticOnly],
+    placeholderData: keepPreviousData,
+    queryFn: async () => {
+      const { data, error } = await api.GET(
+        "/teams/minutes-distribution/leagues",
+        {
+          params: {
+            query: { season: f.season, sort_by: "youth", ...domesticQuery },
+          },
+        },
+      );
+      if (error) throw new Error(JSON.stringify(error));
+      return data as AllLeaguesOverview;
+    },
+  });
+
   const result = distQ.data;
   const overview = leagueOverviewQ.data;
+  const allLeagues = allLeaguesQ.data;
 
   const showClubSkeleton = useDelayedLoading(!!club && distQ.isPending);
   const showLeagueSkeleton = useDelayedLoading(
     !!league && !club && leagueOverviewQ.isPending,
+  );
+  const showAllLeaguesSkeleton = useDelayedLoading(
+    !league && !club && allLeaguesQ.isPending,
   );
 
   const shareRows: SquadShareRow[] = React.useMemo(
@@ -177,9 +226,45 @@ export function MinutesDistributionClient() {
     ? `minutes-distribution-${slugifyForFilename(club)}-${pad2(f.season % 100)}-${pad2((f.season + 1) % 100)}.png`
     : league
       ? `minutes-distribution-${slugifyForFilename(league)}-overview-${pad2(f.season % 100)}-${pad2((f.season + 1) % 100)}.png`
-      : `minutes-distribution-${pad2(f.season % 100)}-${pad2((f.season + 1) % 100)}.png`;
+      : `minutes-distribution-all-leagues-${pad2(f.season % 100)}-${pad2((f.season + 1) % 100)}.png`;
 
   const showingLeagueOverview = !!league && !club;
+  const showingAllLeagues = !league && !club;
+
+  const seasonLabel = `${f.season}/${pad2((f.season + 1) % 100)}`;
+
+  const headerTitle =
+    result && club
+      ? result.club
+      : showingLeagueOverview
+        ? (overview?.league ?? league)
+        : showingAllLeagues
+          ? "All Leagues"
+          : "Minutes Distribution";
+
+  const domesticCountryLabel =
+    result?.domestic_country ?? overview?.domestic_country ?? null;
+
+  const domesticSuffix = domesticOnly
+    ? domesticCountryLabel
+      ? ` · ${domesticCountryLabel} passport only`
+      : " · domestic players only"
+    : "";
+
+  const headerSubtitle =
+    result && club
+      ? `${result.league ?? "Unknown league"} · ${seasonLabel} · max ${result.max_league_games} games (${result.max_league_minutes.toLocaleString()} min)${domesticSuffix}`
+      : showingLeagueOverview
+        ? overview
+          ? `${seasonLabel} · Squad age mix · ${overview.clubs.length} clubs${domesticSuffix}`
+          : `${seasonLabel} · Squad age mix${domesticSuffix}`
+        : showingAllLeagues
+          ? allLeagues
+            ? `${seasonLabel} · Median squad age mix · ${allLeagues.leagues.length} leagues${domesticSuffix}`
+            : `${seasonLabel} · Median squad age mix${domesticSuffix}`
+          : "Pick a league or club to explore squad minutes by age band";
+
+  const showClubLogo = !!(result && club && result.club_logo);
 
   return (
     <ExportProvider title="Minutes Distribution" filename={filename}>
@@ -202,9 +287,7 @@ export function MinutesDistributionClient() {
                   <h3 className="mb-2 text-xs font-semibold uppercase tracking-widest text-content-muted">
                     Season
                   </h3>
-                  <p className="rounded bg-surface-mid/40 px-3 py-2 text-sm text-on-surface">
-                    {f.season}/{pad2((f.season + 1) % 100)}
-                  </p>
+                  <SeasonSelect />
                 </div>
 
                 <div>
@@ -245,6 +328,25 @@ export function MinutesDistributionClient() {
                 <div className="rounded bg-surface-low/40 px-3 py-2 text-[10px] leading-snug text-content-muted">
                   Age bands · Youth &lt; 23 · Peak &lt; 29 · Experienced &lt; 34 · Veteran ≥ 34
                 </div>
+
+                <div>
+                  <label className="flex cursor-pointer items-start gap-3 text-sm text-on-surface">
+                    <input
+                      type="checkbox"
+                      checked={domesticOnly}
+                      onChange={(e) => setDomesticOnly(e.target.checked)}
+                      className="mt-0.5 h-4 w-4 shrink-0 rounded border-outline-variant bg-surface-mid text-primary focus-visible:ring-2 focus-visible:ring-primary/40"
+                    />
+                    <span>
+                      <span className="font-medium">Domestic players only</span>
+                      <span className="mt-0.5 block text-xs text-on-surface-variant">
+                        Recalculate youth / peak / experienced / veteran shares
+                        using only minutes from players with the league&apos;s
+                        domestic passport.
+                      </span>
+                    </span>
+                  </label>
+                </div>
               </GlassCard>
             </aside>
           </ExportFilterArea>
@@ -252,23 +354,20 @@ export function MinutesDistributionClient() {
 
         <main className="min-w-0 overflow-auto p-6">
           <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
-            <ExportSection id="header" label="Title + club" required defaultIncluded>
+            <ExportSection id="header" label="Title" required defaultIncluded>
               <div className="flex items-center gap-3">
-                {result?.club_logo ? (
-                  <ClubLogoImg logoUrl={result.club_logo} className="h-12 w-12" />
-                ) : (
-                  <div className="h-12 w-12 rounded-md bg-surface-mid/40" />
-                )}
+                {showClubLogo ? (
+                  <ClubLogoImg
+                    logoUrl={result!.club_logo!}
+                    className="h-12 w-12"
+                  />
+                ) : null}
                 <div>
                   <h1 className="text-2xl font-bold tracking-tight text-on-surface">
-                    Minutes Distribution
+                    {headerTitle}
                   </h1>
                   <p className="mt-1 text-sm text-on-surface-variant">
-                    {result
-                      ? `${result.club} · ${result.league ?? "Unknown league"} · ${result.season}/${pad2((result.season + 1) % 100)} · max ${result.max_league_games} games (${result.max_league_minutes.toLocaleString()} min)`
-                      : overview
-                        ? `${overview.league} · ${overview.season}/${pad2((overview.season + 1) % 100)} · league overview · ${overview.clubs.length} clubs`
-                        : "Pick a league or club to begin."}
+                    {headerSubtitle}
                   </p>
                 </div>
               </div>
@@ -302,10 +401,43 @@ export function MinutesDistributionClient() {
             </div>
           </div>
 
-          {!league && !club && (
-            <div className="flex min-h-[40vh] items-center justify-center text-sm text-content-muted">
-              Pick a league for an overview, or a club for the full squad view.
+          {showAllLeaguesSkeleton && (
+            <GlassCard className="p-6">
+              <div className="space-y-2">
+                {Array.from({ length: 16 }).map((_, i) => (
+                  <Skeleton key={i} className="h-8 w-full rounded-md" />
+                ))}
+              </div>
+            </GlassCard>
+          )}
+
+          {allLeaguesQ.isError && showingAllLeagues && (
+            <div className="flex min-h-[40vh] items-center justify-center text-sm text-red-400">
+              Error loading leagues overview: {String(allLeaguesQ.error)}
             </div>
+          )}
+
+          {showingAllLeagues && allLeagues && (
+            <ExportSection
+              id="all-leagues-overview"
+              label="All leagues median age mix"
+              defaultIncluded
+            >
+              <GlassCard className="p-4 sm:p-6">
+                <h2 className="mb-3 text-sm font-semibold uppercase tracking-widest text-content-muted">
+                  Squad Age Mix · All Leagues
+                  {domesticOnly ? " · Domestic" : ""}
+                </h2>
+                <AllLeaguesZoneSharesBars
+                  rows={allLeagues.leagues}
+                  season={allLeagues.season}
+                  sortBy={sortBy}
+                  domesticOnly={domesticOnly}
+                  onSortByChange={setSortBy}
+                  onSelectLeague={setLeague}
+                />
+              </GlassCard>
+            </ExportSection>
           )}
 
           {showLeagueSkeleton && (
@@ -333,11 +465,14 @@ export function MinutesDistributionClient() {
               <GlassCard className="p-4 sm:p-6">
                 <h2 className="mb-3 text-sm font-semibold uppercase tracking-widest text-content-muted">
                   Squad Age Mix · {overview.league}
+                  {domesticOnly ? " · Domestic" : ""}
                 </h2>
                 <LeagueZoneSharesBars
                   rows={overview.clubs}
                   league={overview.league}
                   season={overview.season}
+                  domesticOnly={domesticOnly}
+                  domesticCountry={overview.domestic_country}
                   onSelectClub={setClub}
                 />
               </GlassCard>
@@ -371,7 +506,11 @@ export function MinutesDistributionClient() {
                 <GlassCard className="p-4 sm:p-6">
                   <ZoneSharesStrip
                     shares={result.zone_shares}
-                    caption={`${result.club} · share of minutes by age band`}
+                    caption={
+                      domesticOnly
+                        ? `${result.club} · age mix · ${result.domestic_country ?? "domestic"} passport only`
+                        : `${result.club} · share of minutes by age band`
+                    }
                   />
                 </GlassCard>
               </ExportSection>

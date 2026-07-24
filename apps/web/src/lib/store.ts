@@ -12,6 +12,8 @@ export const DEFAULT_SEASON = 2025;
 export interface GlobalFilters {
   season: number;
   leagues: string[];
+  /** Club names (Wyscout `club`); empty = all clubs. */
+  clubs: string[];
   /** Tactical role parents (e.g. Winger); see roleSubTokens for Wyscout codes. */
   selectedRoles: string[];
   roleSubTokens: RoleSubTokensState;
@@ -20,6 +22,7 @@ export interface GlobalFilters {
   minutesMin: number;
   setSeason: (season: number) => void;
   setLeagues: (leagues: string[]) => void;
+  setClubs: (clubs: string[]) => void;
   setSelectedRoles: (roles: string[]) => void;
   setRoleSubTokens: (subs: RoleSubTokensState) => void;
   setRoleFilter: (next: { selectedRoles: string[]; roleSubTokens: RoleSubTokensState }) => void;
@@ -32,6 +35,7 @@ export const useGlobalFilters = create<GlobalFilters>((set) => ({
   // Snapped by SeasonSync if missing from GET /meta/seasons
   season: DEFAULT_SEASON,
   leagues: [...BIG_FIVE_LEAGUES],
+  clubs: [],
   selectedRoles: [],
   roleSubTokens: {},
   ageMin: 16,
@@ -39,6 +43,7 @@ export const useGlobalFilters = create<GlobalFilters>((set) => ({
   minutesMin: 500,
   setSeason: (season) => set({ season }),
   setLeagues: (leagues) => set({ leagues }),
+  setClubs: (clubs) => set({ clubs }),
   setSelectedRoles: (selectedRoles) => set({ selectedRoles }),
   setRoleSubTokens: (roleSubTokens) => set({ roleSubTokens }),
   setRoleFilter: (next) =>

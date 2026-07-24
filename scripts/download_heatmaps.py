@@ -1,5 +1,5 @@
 """Fetch Wyscout `playerHeatmap` for every (wyscout_id, competition_id) in the
-current season parquet(s) and write a parquet per season under
+latest season parquet and write a parquet under
 ``data/players/heatmaps/heatmaps_{year}.parquet``.
 
 Re-runs skip already-cached pairs (read existing parquet → diff → fetch only
@@ -35,7 +35,7 @@ from wyscout_heatmap_lib import (  # noqa: E402
     iter_todo,
 )
 
-CURRENT_SEASON_YEARS: tuple[int, ...] = (2025, 2026)
+CURRENT_SEASON_YEARS: tuple[int, ...] = (2026,)
 
 MAX_WORKERS = 5
 FLUSH_EVERY = 500

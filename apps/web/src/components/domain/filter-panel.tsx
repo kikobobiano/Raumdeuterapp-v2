@@ -5,21 +5,27 @@ import * as React from "react";
 
 import { Button } from "@/components/ui/button";
 import { Combobox } from "@/components/ui/combobox";
+import { MultiCombobox } from "@/components/ui/multi-combobox";
 import { Slider } from "@/components/ui/slider";
 import { RoleFilterSection } from "@/components/domain/role-filter-section";
+import { SeasonSelect } from "@/components/domain/season-select";
 import { BIG_FIVE_LEAGUES } from "@/lib/big-five";
 import { api } from "@/lib/api";
-import { metaSeasonsQueryOptions } from "@/lib/catalog-queries";
 import { useGlobalFilters } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
-export function FilterPanel({ hideSeason = false }: { hideSeason?: boolean }) {
+export function FilterPanel({
+  hideSeason = false,
+  hideLeagues = false,
+  hideClubs = false,
+  extras = null,
+}: {
+  hideSeason?: boolean;
+  hideLeagues?: boolean;
+  hideClubs?: boolean;
+  extras?: React.ReactNode;
+}) {
   const f = useGlobalFilters();
-
-  const seasonsQ = useQuery({
-    ...metaSeasonsQueryOptions(),
-    enabled: !hideSeason,
-  });
 
   const leaguesQ = useQuery({
     queryKey: ["leagues", f.season],
@@ -68,22 +74,48 @@ export function FilterPanel({ hideSeason = false }: { hideSeason?: boolean }) {
     queryFn: async () => (await api.GET("/meta/role-tokens")).data ?? {},
   });
 
+  const clubsQ = useQuery({
+    queryKey: ["filter-clubs", f.season, f.leagues],
+    queryFn: async () => {
+      const { data, error } = await api.GET("/meta/teams", {
+        params: {
+          query: {
+            season: f.season,
+            ...(f.leagues.length ? { leagues: f.leagues } : {}),
+          },
+        },
+      });
+      if (error) throw new Error("clubs");
+      return data ?? [];
+    },
+  });
+
+  const clubOptions = React.useMemo(
+    () => (clubsQ.data ?? []).map((c) => ({ value: c, label: c })),
+    [clubsQ.data],
+  );
+
+  // Drop selected clubs that fall outside the current league/season scope so the
+  // filter never sends clubs that can't match any row.
+  React.useEffect(() => {
+    if (!clubsQ.isSuccess) return;
+    const valid = new Set(clubsQ.data ?? []);
+    const pruned = f.clubs.filter((c) => valid.has(c));
+    if (pruned.length !== f.clubs.length) f.setClubs(pruned);
+    // Intentionally keyed on the fetched option set, not on f.clubs, to avoid loops.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clubsQ.isSuccess, clubsQ.data]);
+
   return (
     <div className="space-y-5">
       {!hideSeason ? (
         <div>
           <p className="label-caps mb-2">Season</p>
-          <Combobox
-            value={String(f.season)}
-            onChange={(v) => f.setSeason(Number(v))}
-            options={(seasonsQ.data ?? []).map((y) => ({
-              value: String(y),
-              label: `${String(y).slice(2)}-${String(y + 1).slice(2)}`,
-            }))}
-          />
+          <SeasonSelect />
         </div>
       ) : null}
 
+      {!hideLeagues && (
       <div>
         <div className="mb-2 flex items-center justify-between gap-2">
           <p className="label-caps">Leagues</p>
@@ -156,6 +188,36 @@ export function FilterPanel({ hideSeason = false }: { hideSeason?: boolean }) {
           })}
         </div>
       </div>
+      )}
+
+      {!hideClubs && (
+      <div>
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <p className="label-caps">Clubs</p>
+          {f.clubs.length > 0 && (
+            <button
+              type="button"
+              className="shrink-0 text-xs text-primary hover:underline"
+              onClick={() => f.setClubs([])}
+            >
+              Clear
+            </button>
+          )}
+        </div>
+        <p className="mb-2 text-xs text-on-surface-variant">
+          Multi-select. None = all clubs{f.leagues.length ? " in the selected leagues" : ""}.
+        </p>
+        {clubsQ.isError && (
+          <p className="mb-2 text-xs text-error">Could not load clubs for this scope.</p>
+        )}
+        <MultiCombobox
+          value={f.clubs}
+          onChange={(v) => f.setClubs(v)}
+          options={clubOptions}
+          placeholder={clubsQ.isPending ? "Loading clubs…" : "Search clubs…"}
+        />
+      </div>
+      )}
 
       <RoleFilterSection
         value={{ selectedRoles: f.selectedRoles, roleSubTokens: f.roleSubTokens }}
@@ -195,6 +257,8 @@ export function FilterPanel({ hideSeason = false }: { hideSeason?: boolean }) {
           onValueChange={([v]) => f.setMinutesMin(v)}
         />
       </div>
+
+      {extras}
     </div>
   );
 }

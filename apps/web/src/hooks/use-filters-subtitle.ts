@@ -33,6 +33,9 @@ export function useFiltersSubtitle({ prefix }: Options = {}): string {
     if (prefix && prefix.trim()) parts.push(prefix.trim());
     parts.push(seasonLabel(f.season));
     parts.push(leaguesLabel);
+    if (f.clubs.length > 0) {
+      parts.push(f.clubs.length === 1 ? f.clubs[0] : `${f.clubs.length} clubs`);
+    }
     if (f.selectedRoles.length > 0) {
       parts.push(f.selectedRoles.join(", "));
     }
@@ -49,6 +52,7 @@ export function useFiltersSubtitle({ prefix }: Options = {}): string {
     prefix,
     f.season,
     leaguesLabel,
+    f.clubs,
     f.selectedRoles,
     f.ageMax,
     f.ageMin,

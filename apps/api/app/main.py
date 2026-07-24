@@ -16,6 +16,7 @@ from app.routers import (
     rankings,
     replacement,
     scatter,
+    scouting,
     screener,
     team_minutes,
     team_squad_value,
@@ -47,6 +48,7 @@ app.include_router(players.router)
 app.include_router(profile.router)
 app.include_router(scatter.router)
 app.include_router(screener.router)
+app.include_router(scouting.router)
 app.include_router(progression.router)
 app.include_router(replacement.router)
 app.include_router(rankings.router)

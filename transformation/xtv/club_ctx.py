@@ -88,10 +88,14 @@ def load_clubs(tm_dir: Path) -> pd.DataFrame:
         usecols=["competition_id", "name"],
         engine="python",
         on_bad_lines="skip",
-    )
+    ).rename(columns={"name": "competition_name"})
+    # NB: both frames carry a "name" column (club vs competition). Rename the
+    # competition one before the merge so the club "name" survives intact —
+    # otherwise pandas emits name_x/name_y and downstream `clubs["name"]` breaks
+    # and the league mapping silently falls back to the TM code (league_power NaN).
     merged = clubs.merge(comp, left_on="domestic_competition_id", right_on="competition_id", how="left")
     merged["wyscout_league"] = [
-        _tm_comp_to_league(row.get("name"), row.get("domestic_competition_id"))
+        _tm_comp_to_league(row.get("competition_name"), row.get("domestic_competition_id"))
         for _, row in merged.iterrows()
     ]
     merged["league_power"] = merged["wyscout_league"].map(LEAGUE_POWER_BASE)

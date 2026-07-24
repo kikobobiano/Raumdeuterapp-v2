@@ -70,11 +70,11 @@ export function RankingsIndexClient() {
 
   const filterSig = React.useMemo(
     () =>
-      `${f.leagues.join(",")}:${rolesForApi({
+      `${f.leagues.join(",")}:${f.clubs.join(",")}:${rolesForApi({
         selectedRoles: f.selectedRoles,
         roleSubTokens: f.roleSubTokens,
       }).join(";")}:${f.ageMin}:${f.ageMax}:${f.minutesMin}`,
-    [f.leagues, f.selectedRoles, f.roleSubTokens, f.ageMin, f.ageMax, f.minutesMin],
+    [f.leagues, f.clubs, f.selectedRoles, f.roleSubTokens, f.ageMin, f.ageMax, f.minutesMin],
   );
   const prevFilterSig = React.useRef(filterSig);
 
@@ -112,6 +112,7 @@ export function RankingsIndexClient() {
       "top-performance",
       season,
       f.leagues,
+      f.clubs,
       rolesPayload,
       f.ageMin,
       f.ageMax,
@@ -127,6 +128,7 @@ export function RankingsIndexClient() {
             limit: PAGE_SIZE,
             offset,
             leagues: f.leagues.length ? f.leagues : undefined,
+            teams: f.clubs.length ? f.clubs : undefined,
             roles: rolesPayload.length ? rolesPayload : undefined,
             age_min: f.ageMin,
             age_max: f.ageMax,

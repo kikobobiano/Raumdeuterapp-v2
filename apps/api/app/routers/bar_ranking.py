@@ -35,10 +35,10 @@ def bar_ranking(req: BarRankingRequest) -> BarRankingResponse:
             if not name or name not in allowed:
                 raise HTTPException(400, f"Unknown or unavailable sort metric: {req.sort_by!r}")
 
-        where_sql, params = build_where(req.filters)
+        vcols = column_names_in_view(conn, view)
+        where_sql, params = build_where(req.filters, cols=vcols)
         where = f"WHERE {where_sql}" if where_sql else ""
 
-        vcols = column_names_in_view(conn, view)
         age_sel = player_age_sql(vcols, req.filters.season)
 
         select_parts = [

@@ -265,7 +265,7 @@ export function HorizontalBarRanking({
     return () => ro.disconnect();
   }, []);
 
-  const { item, state, onInitialized: onHoverInitialized, containerRef } =
+  const { item, state, onHover, onUnhover, onMouseMove, onInitialized, containerRef } =
     useOverlayHover(ordered);
 
   const onPlotClick = React.useCallback((ev: Readonly<PlotMouseEvent>) => {
@@ -309,7 +309,7 @@ export function HorizontalBarRanking({
         ))}
       </div>
 
-      <div ref={containerRef} className="relative w-full min-w-0">
+      <div ref={containerRef} className="relative w-full min-w-0" onMouseMove={onMouseMove}>
         <Plot
           data={data}
           layout={{
@@ -356,7 +356,9 @@ export function HorizontalBarRanking({
           config={PLOTLY_APP_CONFIG}
           style={{ width: "100%" }}
           useResizeHandler
-          onInitialized={onHoverInitialized}
+          onInitialized={onInitialized}
+          onHover={onHover}
+          onUnhover={onUnhover}
           onClick={onPlotClick}
         />
         {item && state && (

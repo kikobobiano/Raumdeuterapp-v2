@@ -29,6 +29,7 @@ export interface CohortPlayer {
 export interface CohortFilters {
   season: number;
   leagues: string[] | null;
+  teams?: string[] | null;
   roles: string[] | null;
   age_min?: number | null;
   age_max?: number | null;
@@ -86,6 +87,7 @@ const filterSig = (f: CohortFilters): string =>
   [
     f.season,
     (f.leagues ?? []).join(","),
+    (f.teams ?? []).join(","),
     (f.roles ?? []).join(","),
     f.age_min ?? "",
     f.age_max ?? "",

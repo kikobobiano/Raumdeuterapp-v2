@@ -22,6 +22,7 @@ from app.core.player_traits import TRAIT_METRICS, select_player_traits
 from app.core.profile_percentiles import percentiles_for_cohort, performance_index_role_rank
 from app.core.sql_ident import q_ident
 from app.core.xtv_history import build_xtv_history_payload
+from app.core.xtv_eligibility import league_supports_xtv
 from app.schemas import (
     GameAreaProfileBlock,
     PerformanceIndexHistoryPoint,
@@ -212,6 +213,13 @@ def profile(
         description="Percentile cohort league; omit to use this player's league",
     ),
     min_minutes: int = Query(PROFILE_RADAR_MIN_MINUTES, ge=0),
+    table_role: str | None = Query(
+        None,
+        description=(
+            "Override which role preset builds profile.table. Used by Compare so a "
+            "player from another position still returns the primary preset metrics."
+        ),
+    ),
     performance_index_history_limit: int | None = Query(
         None,
         ge=1,
@@ -293,7 +301,14 @@ def profile(
             v = num(key)
             return int(v) if v is not None else None
 
-        metric_list = ROLE_TABLE_METRICS.get(role or "Midfielder", [])
+        if table_role is not None and table_role not in ROLE_TABLE_METRICS:
+            raise HTTPException(
+                400,
+                f"Unknown table_role: {table_role}. "
+                f"Expected one of: {', '.join(sorted(ROLE_TABLE_METRICS))}",
+            )
+        table_role_key = table_role or role or "Midfielder"
+        metric_list = ROLE_TABLE_METRICS.get(table_role_key, ROLE_TABLE_METRICS["Midfielder"])
         table_metrics = [m for m in metric_list if m in cols]
 
         perc_inputs: OrderedDict[str, float] = OrderedDict()
@@ -500,7 +515,9 @@ def profile(
             games=games,
             goals=goals_n,
             assists=assists_n,
-            x_tv_eur=num("x_tv_eur"),
+            x_tv_eur=num("x_tv_eur")
+            if league_supports_xtv(str(rec.get("league") or "") or None)
+            else None,
             player_image_url=img,
             position_tokens=toks,
             position_tokens_primary=toks_primary,

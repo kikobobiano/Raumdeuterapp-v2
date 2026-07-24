@@ -25,7 +25,16 @@ interface Props {
   initialMetrics?: string[];
 }
 
-const DEFAULT_METRICS = ["xG", "xA", "Goals"];
+/** Quality scores (0–100) — same family as radar game-area indices. */
+const DEFAULT_METRICS = [
+  "LinkUp Play Quality",
+  "Finishing Quality",
+  "Dribling Quality",
+  "Distribution Quality",
+  "Aerial Play Quality",
+  "Ground Defense Quality",
+  "Creativity Quality",
+];
 
 /** Always fetch this many seasons; narrower window is client-side slice (no extra API calls). */
 const PROGRESSION_FETCH_SEASONS = 10;
@@ -39,7 +48,7 @@ export function ProfileProgressionPanel({
   const [open, setOpen] = React.useState(false);
   const [seasonsCount, setSeasonsCount] = React.useState(10);
   const [metrics, setMetrics] = React.useState<string[]>(initialMetrics);
-  const [mode, setMode] = React.useState<MetricMode>("p90");
+  const [mode, setMode] = React.useState<MetricMode>("as_is");
   const [pickerValue, setPickerValue] = React.useState<string>("");
 
   const metricsListQ = useQuery({

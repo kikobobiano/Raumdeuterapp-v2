@@ -304,7 +304,7 @@ export function SquadAgeMinutesScatter({
     [height, xMin, xMax, yMax, sans, shapes, annotations],
   );
 
-  const { item, state, onInitialized, containerRef } = useOverlayHover(valid);
+  const { item, state, onHover, onUnhover, onMouseMove, onInitialized, containerRef } = useOverlayHover(valid);
 
   const onClick = React.useCallback(
     (ev: Readonly<PlotMouseEvent>) => {
@@ -318,7 +318,7 @@ export function SquadAgeMinutesScatter({
   );
 
   return (
-    <div ref={containerRef} className="relative w-full">
+    <div ref={containerRef} className="relative w-full" onMouseMove={onMouseMove}>
       <Plot
         data={data}
         layout={layout}
@@ -326,6 +326,8 @@ export function SquadAgeMinutesScatter({
         style={{ width: "100%" }}
         useResizeHandler
         onInitialized={onInitialized}
+        onHover={onHover}
+        onUnhover={onUnhover}
         onClick={onClick}
       />
       {item && state && (

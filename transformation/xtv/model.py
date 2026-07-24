@@ -365,7 +365,6 @@ def sklearn_pipeline(*, enable_early_stopping: bool = True) -> Any:
         from sklearn.impute import SimpleImputer
         from sklearn.ensemble import HistGradientBoostingRegressor
         from sklearn.pipeline import Pipeline
-        from sklearn.preprocessing import FunctionTransformer
     except ImportError as e:
         raise RuntimeError("Training requires sklearn in the active environment.") from e
 
@@ -375,11 +374,7 @@ def sklearn_pipeline(*, enable_early_stopping: bool = True) -> Any:
     pre = ColumnTransformer(
         [
             ("num", SimpleImputer(strategy="median"), num_feats),
-            (
-                "cat_pass",
-                FunctionTransformer(lambda x: x, validate=False),
-                cat_feats,
-            ),
+            ("cat_pass", "passthrough", cat_feats),
         ],
         remainder="drop",
         sparse_threshold=0.0,
@@ -415,7 +410,9 @@ def fit(pipe: Any, X: pd.DataFrame, y: pd.Series, *, sample_weight: np.ndarray |
         raise ValueError("No training rows.")
     Xp = _prepare_matrix(X)
     if sample_weight is not None:
-        pipe.fit(Xp, y, sample_weight=sample_weight)
+        # Route the weights to the final estimator step ("model"); modern sklearn
+        # Pipelines reject a bare ``sample_weight`` kwarg on ``fit``.
+        pipe.fit(Xp, y, model__sample_weight=sample_weight)
     else:
         pipe.fit(Xp, y)
     return pipe
@@ -445,26 +442,6 @@ def recency_sample_weight(transfer_years: np.ndarray) -> np.ndarray:
     return np.exp(0.08 * (yrs - base))
 
 
-def _predict_row_fee(
-    pipe_ratio: Any,
-    row: pd.DataFrame,
-    *,
-    mv_eur: float | None,
-    pipe_abs: Any | None,
-) -> float:
-    has_mv = float(row["has_mv"].iloc[0]) > 0.5 and mv_eur is not None and np.isfinite(mv_eur) and mv_eur > 0
-    if has_mv and pipe_ratio is not None:
-        lr = float(pipe_ratio.predict(_prepare_matrix(row))[0])
-        return float(mv_eur * np.exp(np.clip(lr, np.log(0.1), np.log(4.0))))
-    if pipe_abs is not None:
-        la = float(pipe_abs.predict(_prepare_matrix(row))[0])
-        return float(np.exp(np.clip(la, LOG_FEE_MIN, LOG_FEE_MAX)))
-    if pipe_ratio is not None:
-        la = float(pipe_ratio.predict(_prepare_matrix(row))[0])
-        return float(np.exp(np.clip(la, LOG_FEE_MIN, LOG_FEE_MAX)))
-    return float("nan")
-
-
 def predict_xtv_with_marginal(
     pipe_ratio: Any,
     base: pd.DataFrame,
@@ -474,21 +451,51 @@ def predict_xtv_with_marginal(
     mv_eur: np.ndarray | None = None,
     pipe_abs: Any | None = None,
 ) -> np.ndarray:
+    """Marginalise the fee over ``ns`` sampled destinations, per row.
+
+    Vectorised: every (row × destination sample) is stacked into one matrix and
+    scored in two batched ``predict`` calls (ratio head for rows with a known
+    market value, absolute-fee head otherwise). This is numerically equivalent
+    to the earlier per-row loop but orders of magnitude faster on full parquets.
+    """
+
     n = len(base)
-    ns = dest_power.shape[1]
-    out = np.full(n, np.nan, dtype=np.float64)
-    for i in range(n):
-        preds: list[float] = []
-        mv = None if mv_eur is None else float(mv_eur[i])
-        for j in range(ns):
-            row = base.iloc[[i]].copy()
-            row["dest_league_power"] = float(dest_power[i, j])
-            row["dest_club_tier"] = int(dest_tier[i, j])
-            fee = _predict_row_fee(pipe_ratio, row, mv_eur=mv, pipe_abs=pipe_abs)
-            if np.isfinite(fee):
-                preds.append(fee)
-        if preds:
-            out[i] = float(np.mean(preds))
+    ns = int(dest_power.shape[1])
+    if n == 0:
+        return np.zeros(0, dtype=np.float64)
+
+    big = base.loc[base.index.repeat(ns)].reset_index(drop=True)
+    big["dest_league_power"] = np.asarray(dest_power, dtype=np.float64).reshape(-1)
+    big["dest_club_tier"] = np.asarray(dest_tier).reshape(-1).astype(np.int64)
+    Xp = _prepare_matrix(big)
+
+    mv = None if mv_eur is None else np.asarray(mv_eur, dtype=np.float64)
+    row_has_mv = pd.to_numeric(base["has_mv"], errors="coerce").to_numpy() > 0.5
+    if mv is None:
+        row_has_mv = np.zeros(n, dtype=bool)
+    else:
+        row_has_mv = row_has_mv & np.isfinite(mv) & (mv > 0)
+
+    has_mv_big = np.repeat(row_has_mv, ns)
+    fee_big = np.full(n * ns, np.nan, dtype=np.float64)
+
+    if pipe_ratio is not None and has_mv_big.any():
+        mv_big = np.repeat(mv, ns)  # type: ignore[arg-type]
+        lr = np.asarray(pipe_ratio.predict(Xp[has_mv_big]), dtype=np.float64)
+        fee_big[has_mv_big] = mv_big[has_mv_big] * np.exp(np.clip(lr, np.log(0.1), np.log(4.0)))
+
+    abs_mask = ~has_mv_big
+    if abs_mask.any():
+        abs_pipe = pipe_abs if pipe_abs is not None else pipe_ratio
+        if abs_pipe is not None:
+            la = np.asarray(abs_pipe.predict(Xp[abs_mask]), dtype=np.float64)
+            fee_big[abs_mask] = np.exp(np.clip(la, LOG_FEE_MIN, LOG_FEE_MAX))
+
+    fee_mat = fee_big.reshape(n, ns)
+    all_nan = np.isnan(fee_mat).all(axis=1)
+    with np.errstate(invalid="ignore"):
+        out = np.nanmean(fee_mat, axis=1)
+    out = np.where(all_nan, np.nan, out)
     return np.clip(out, FEE_MIN_EUR, FEE_MAX_EUR)
 
 

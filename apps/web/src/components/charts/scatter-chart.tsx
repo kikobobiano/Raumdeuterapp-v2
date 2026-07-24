@@ -151,10 +151,44 @@ function labelText(player: string): string {
   return `${s.slice(0, 14)}…`;
 }
 
-function isHighlighted(p: ScatterPoint, highlightIds: Set<number>): boolean {
+function isHighlighted(
+  p: ScatterPoint,
+  highlightIds: Set<number>,
+  highlightClubs: Set<string>,
+): boolean {
+  if (highlightClubs.size > 0) {
+    const key = (p.club ?? p.player).trim();
+    if (key && highlightClubs.has(key)) return true;
+  }
   if (highlightIds.size === 0) return false;
   if (p.wyscout_id == null) return false;
   return highlightIds.has(Number(p.wyscout_id));
+}
+
+/** OLS fit y = intercept + slope * x; returns segment endpoints over x range. */
+function linearRegressionSegment(
+  pts: { x: number; y: number }[],
+): { x1: number; x2: number; y1: number; y2: number } | null {
+  if (pts.length < 2) return null;
+  const n = pts.length;
+  let sumX = 0;
+  let sumY = 0;
+  let sumXX = 0;
+  let sumXY = 0;
+  for (const p of pts) {
+    sumX += p.x;
+    sumY += p.y;
+    sumXX += p.x * p.x;
+    sumXY += p.x * p.y;
+  }
+  const denom = n * sumXX - sumX * sumX;
+  if (Math.abs(denom) < 1e-12) return null;
+  const slope = (n * sumXY - sumX * sumY) / denom;
+  const intercept = (sumY - slope * sumX) / n;
+  const xs = pts.map((p) => p.x);
+  const x1 = Math.min(...xs);
+  const x2 = Math.max(...xs);
+  return { x1, x2, y1: intercept + slope * x1, y2: intercept + slope * x2 };
 }
 
 interface Props {
@@ -164,11 +198,15 @@ interface Props {
   height?: number;
   /** Emphasise these players (Wyscout ids). Others render in neutral when non-empty. */
   highlightWyscoutIds?: number[];
+  /** Emphasise clubs by name (team scatters). Matches ``club`` or ``player`` label. */
+  highlightClubs?: string[];
   /**
    * When true: automatic top-axis labels; only union-top points keep full league luminance,
    * others are darkened. When false: no automatic labels (only highlighted players show names).
    */
   emphasiseTop?: boolean;
+  /** Draw OLS trend line through valid points (markers remain hoverable). */
+  showLinearRegression?: boolean;
 }
 
 export function ScatterChart({
@@ -177,14 +215,14 @@ export function ScatterChart({
   yLabel,
   height = 520,
   highlightWyscoutIds = [],
+  highlightClubs = [],
   emphasiseTop = false,
+  showLinearRegression = false,
 }: Props) {
   const sans = plotlySansFontFamily();
-  const hoverHtml = (p: ScatterPoint) =>
-    `<b>${p.player}</b><br>${p.club ?? "—"} · ${p.league ?? "—"}<br>` +
-    `${p.position ?? ""} · age ${p.age ?? "—"} · ${p.minutes ?? 0}'`;
 
   const highlightKey = highlightWyscoutIds.join(",");
+  const highlightClubsKey = highlightClubs.join("|");
 
   /** Pixel offset presets for label placement (xshift, yshift). First = directly above. */
   const LABEL_SHIFT_PRESETS: ReadonlyArray<readonly [number, number]> = [
@@ -232,7 +270,10 @@ export function ScatterChart({
     const highlightSet = new Set(
       highlightWyscoutIds.filter((id) => Number.isFinite(id)),
     );
-    const manualHighlight = highlightSet.size > 0;
+    const highlightClubSet = new Set(
+      highlightClubs.map((c) => c.trim()).filter(Boolean),
+    );
+    const manualHighlight = highlightSet.size > 0 || highlightClubSet.size > 0;
 
     const autoLabeled =
       emphasiseTop || manualHighlight
@@ -240,8 +281,13 @@ export function ScatterChart({
         : new Set<string>();
 
     const labeledPoints: { p: ScatterPoint; text: string }[] = [];
+    const labelAllClubs = highlightClubSet.size > 0;
     for (const p of valid) {
-      if (isHighlighted(p, highlightSet)) {
+      if (isHighlighted(p, highlightSet, highlightClubSet)) {
+        labeledPoints.push({ p, text: labelText(p.player) });
+        continue;
+      }
+      if (labelAllClubs) {
         labeledPoints.push({ p, text: labelText(p.player) });
         continue;
       }
@@ -254,7 +300,16 @@ export function ScatterChart({
     const leagues = valid.map((p) => p.league ?? "—");
     const cmap = leagueColorMap(leagues);
     const colors = valid.map((p) => {
-      if (manualHighlight && !isHighlighted(p, highlightSet)) return NEUTRAL_DOT;
+      if (manualHighlight && !isHighlighted(p, highlightSet, highlightClubSet)) {
+        return NEUTRAL_DOT;
+      }
+      if (
+        manualHighlight &&
+        highlightClubSet.size > 0 &&
+        isHighlighted(p, highlightSet, highlightClubSet)
+      ) {
+        return "#14d1ff";
+      }
       const base = cmap.get(p.league ?? "—")!;
       if (!emphasiseTop) return base;
       const isTop = autoLabeled.has(pointIdentity(p));
@@ -266,8 +321,8 @@ export function ScatterChart({
 
     const opacities = valid.map((p) => {
       if (manualHighlight) {
-        if (isHighlighted(p, highlightSet)) return 1;
-        return 0.72;
+        if (isHighlighted(p, highlightSet, highlightClubSet)) return 1;
+        return 0.45;
       }
       if (emphasiseTop) {
         const isTop = autoLabeled.has(pointIdentity(p));
@@ -280,7 +335,7 @@ export function ScatterChart({
     const markerTrace = {
       x: valid.map((p) => p.x as number),
       y: valid.map((p) => p.y as number),
-      type: "scattergl" as const,
+      type: (valid.length > 500 ? "scattergl" : "scatter") as "scatter" | "scattergl",
       mode: "markers" as const,
       name: "Players",
       hoverinfo: "none" as const,
@@ -289,7 +344,14 @@ export function ScatterChart({
         color: colors,
         size: baseSize,
         opacity: opacities,
-        line: { width: 0 },
+        line: {
+          width: valid.map((p) =>
+            manualHighlight && isHighlighted(p, highlightSet, highlightClubSet) ? 2 : 0,
+          ),
+          color: valid.map((p) =>
+            isHighlighted(p, highlightSet, highlightClubSet) ? "#14d1ff" : "rgba(0,0,0,0)",
+          ),
+        },
       },
       showlegend: false,
     };
@@ -312,9 +374,32 @@ export function ScatterChart({
 
     const leagueColors = valid.map((p) => cmap.get(p.league ?? "—") ?? "#14d1ff");
 
-    return { data: [markerTrace], labelAnnotations, valid, leagueColors };
+    const traces: object[] = [markerTrace];
+    if (showLinearRegression) {
+      const seg = linearRegressionSegment(
+        valid.map((p) => ({ x: p.x as number, y: p.y as number })),
+      );
+      if (seg) {
+        traces.push({
+          x: [seg.x1, seg.x2],
+          y: [seg.y1, seg.y2],
+          type: "scatter" as const,
+          mode: "lines" as const,
+          hoverinfo: "none" as const,
+          cliponaxis: false,
+          line: {
+            color: "rgba(20,209,255,0.55)",
+            width: 2,
+            dash: "dot",
+          },
+          showlegend: false,
+        });
+      }
+    }
+
+    return { data: traces, labelAnnotations, valid, leagueColors };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [points, highlightKey, emphasiseTop, xLabel, yLabel, sans]);
+  }, [points, highlightKey, highlightClubsKey, emphasiseTop, showLinearRegression, xLabel, yLabel, sans]);
 
   const layout = React.useMemo(
     () => ({
@@ -347,17 +432,19 @@ export function ScatterChart({
   );
 
   const resolveHover = React.useCallback(
-    (_curve: number, idx: number) => {
+    (curve: number, idx: number) => {
+      if (curve !== 0) return null;
       const p = valid[idx];
       if (!p) return null;
       return { p, color: leagueColors[idx] ?? "#14d1ff" };
     },
     [valid, leagueColors],
   );
-  const { item, state, onInitialized, containerRef } = useOverlayHoverByCurve(resolveHover);
+  const { item, state, onHover, onUnhover, onMouseMove, onInitialized, containerRef } =
+    useOverlayHoverByCurve(resolveHover);
 
   return (
-    <div ref={containerRef} className="scatter-chart-root relative w-full">
+    <div ref={containerRef} className="scatter-chart-root relative w-full" onMouseMove={onMouseMove}>
       <style
         dangerouslySetInnerHTML={{
           __html: `
@@ -373,6 +460,8 @@ export function ScatterChart({
         style={{ width: "100%" }}
         useResizeHandler
         onInitialized={onInitialized}
+        onHover={onHover}
+        onUnhover={onUnhover}
       />
       {item && state && (
         <div

@@ -41,12 +41,13 @@ export default function PotentialPage() {
     () => ({
       season: f.season,
       leagues: f.leagues.length ? f.leagues : null,
+      teams: f.clubs.length ? f.clubs : null,
       roles: rolesPayload.length ? rolesPayload : null,
       age_min: f.ageMin,
       age_max: f.ageMax,
       minutes_min: f.minutesMin,
     }),
-    [f.season, f.leagues, rolesPayload, f.ageMin, f.ageMax, f.minutesMin],
+    [f.season, f.leagues, f.clubs, rolesPayload, f.ageMin, f.ageMax, f.minutesMin],
   );
 
   const visibleAges = React.useMemo(() => {

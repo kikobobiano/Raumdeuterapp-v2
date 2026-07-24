@@ -1,6 +1,6 @@
-"""Attach ``x_tv_eur`` to every ``{Y}_all_leagues.parquet``.
+"""Attach ``x_tv_eur`` to the latest season ``{Y}_all_leagues.parquet``.
 
-For each season parquet:
+For the season parquet:
 
 1. Compute TM market value as-of the season reference date via
    :func:`utils.tm_market_value.infer_tm_market_value_eur` (column
@@ -29,6 +29,8 @@ import pandas as pd
 
 
 _YEAR_PQ = re.compile(r"^(20\d{2})_all_leagues\.parquet$")
+
+CURRENT_SEASON_YEARS: tuple[int, ...] = (2026,2025,2024,2023,2022,2021,2020,2019,2018,2016,2015)
 
 
 def _mv_for_parquet(
@@ -156,14 +158,19 @@ def main() -> int:
     peer_tbl = build_peer_mv_table(args.players_dir)
     print(f"  peer buckets: {len(peer_tbl)}")
 
-    files = sorted(args.players_dir.glob("*_all_leagues.parquet"))
-    if not files:
-        print(f"No parquets under {args.players_dir}", file=sys.stderr)
+    files = [
+        args.players_dir / f"{year}_all_leagues.parquet" for year in CURRENT_SEASON_YEARS
+    ]
+    if not any(p.is_file() for p in files):
+        print(f"No parquets for {CURRENT_SEASON_YEARS} under {args.players_dir}", file=sys.stderr)
         return 3
 
     rng = np.random.default_rng(args.seed)
 
     for pq in files:
+        if not pq.is_file():
+            print(f"Skipping {pq.name}: not found")
+            continue
         m = _YEAR_PQ.match(pq.name)
         if not m:
             continue
@@ -204,6 +211,12 @@ def main() -> int:
             mv_eur=mv_arr,
             pipe_abs=pipe_abs,
         )
+
+        from utils.config import LEAGUES_WITHOUT_XTV
+
+        if "league" in df.columns and LEAGUES_WITHOUT_XTV:
+            ineligible = df["league"].astype(str).str.strip().isin(LEAGUES_WITHOUT_XTV)
+            xtv = np.where(ineligible.to_numpy(), np.nan, xtv)
 
         df_out = df.copy()
         df_out[TM_MV_COL] = mv.to_numpy(dtype=np.float64)

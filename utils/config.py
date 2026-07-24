@@ -103,6 +103,9 @@ LEAGUE_POWER_BASE: Dict[str, float] = {
     "Campeonato de Portugal": 60.0,
 }
 
+# xTV is not computed or surfaced for these leagues (thin TM / training coverage).
+LEAGUES_WITHOUT_XTV: frozenset[str] = frozenset({"Campeonato de Portugal"})
+
 LEAGUE_POWER_MIN, LEAGUE_POWER_MAX = 0.80, 1.10
 LEAGUE_POWER_MIN_ADJUSTED, LEAGUE_POWER_MAX_ADJUSTED = 0.65, 1.0
 

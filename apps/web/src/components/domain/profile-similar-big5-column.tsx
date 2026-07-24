@@ -14,6 +14,11 @@ import { cn } from "@/lib/utils";
 
 const MINUTES_MIN = 500;
 
+/** Season start year → short label, e.g. 2025 → "25-26". */
+function seasonLabel(year: number): string {
+  return `${String(year).slice(2)}-${String(year + 1).slice(2)}`;
+}
+
 /**
  * Same raw cosine as Replacement Finder (`similarity.toFixed(3)`).
  * Percent = similarity × 100, clamped to [0, 100] so 0.847 → 85%.
@@ -59,24 +64,70 @@ export function ProfileSimilarBig5Column({
     enabled: deferFetch && Number.isFinite(wyscoutId),
   });
 
-  const bigFiveFiltered = React.useMemo(() => {
-    const avail = leaguesQ.data;
-    const inSeason = BIG_FIVE_LEAGUES.filter((l) =>
-      avail == null ? true : avail.includes(l),
-    );
-    return inSeason.length > 0 ? inSeason : [...BIG_FIVE_LEAGUES];
-  }, [leaguesQ.data]);
+  const bigFiveInSeason = React.useMemo(
+    () => BIG_FIVE_LEAGUES.filter((l) => (leaguesQ.data ?? []).includes(l)),
+    [leaguesQ.data],
+  );
+
+  // Big 5 seasons kick off ~August, so a freshly-started season (e.g. 2026)
+  // has no Big 5 rows in the parquet yet. When that happens, draw the candidate
+  // pool from the previous season instead.
+  const needsPrevSeasonFallback =
+    leaguesQ.isFetched && bigFiveInSeason.length === 0;
+  const prevSeason = season - 1;
+
+  const prevLeaguesQ = useQuery({
+    queryKey: ["similar-big5-leagues", prevSeason],
+    queryFn: async () => {
+      const { data } = await api.GET("/meta/leagues", {
+        params: { query: { season: prevSeason } },
+      });
+      return data ?? [];
+    },
+    enabled: deferFetch && Number.isFinite(wyscoutId) && needsPrevSeasonFallback,
+  });
+
+  const { candidateSeason, bigFiveFiltered } = React.useMemo(() => {
+    if (bigFiveInSeason.length > 0) {
+      return { candidateSeason: season, bigFiveFiltered: bigFiveInSeason };
+    }
+    if (needsPrevSeasonFallback && prevLeaguesQ.isFetched) {
+      const prevAvail = prevLeaguesQ.data ?? [];
+      const prevBig5 = BIG_FIVE_LEAGUES.filter((l) => prevAvail.includes(l));
+      return {
+        candidateSeason: prevSeason,
+        bigFiveFiltered: prevBig5.length > 0 ? prevBig5 : [...BIG_FIVE_LEAGUES],
+      };
+    }
+    return { candidateSeason: season, bigFiveFiltered: [...BIG_FIVE_LEAGUES] };
+  }, [
+    bigFiveInSeason,
+    needsPrevSeasonFallback,
+    prevLeaguesQ.isFetched,
+    prevLeaguesQ.data,
+    season,
+    prevSeason,
+  ]);
+
+  const usingPrevSeason = candidateSeason !== season;
 
   const repQ = useQuery({
-    queryKey: ["profile-similar-big5", wyscoutId, season, bigFiveFiltered, rolesPayload],
+    queryKey: [
+      "profile-similar-big5",
+      wyscoutId,
+      season,
+      candidateSeason,
+      bigFiveFiltered,
+      rolesPayload,
+    ],
     queryFn: async () => {
       const { data, error } = await api.POST("/replacement", {
         body: {
           target_player_id: wyscoutId,
           target_season: season,
-          candidate_seasons: [season],
+          candidate_seasons: [candidateSeason],
           candidate_filters: {
-            season,
+            season: candidateSeason,
             leagues: bigFiveFiltered,
             roles: rolesPayload.length > 0 ? rolesPayload : null,
             age_min: 15,
@@ -92,15 +143,29 @@ export function ProfileSimilarBig5Column({
       if (error) throw new Error(JSON.stringify(error));
       return data!;
     },
-    enabled: deferFetch && leaguesQ.isFetched && Number.isFinite(wyscoutId),
+    enabled:
+      deferFetch &&
+      leaguesQ.isFetched &&
+      Number.isFinite(wyscoutId) &&
+      (!needsPrevSeasonFallback || prevLeaguesQ.isFetched),
   });
 
-  const showSkeleton = !deferFetch || repQ.isLoading;
+  const gatingPending =
+    (deferFetch && !leaguesQ.isFetched) ||
+    (needsPrevSeasonFallback && !prevLeaguesQ.isFetched);
+  const showSkeleton = !deferFetch || gatingPending || repQ.isLoading;
 
   return (
     <GlassCard className="flex min-h-[min(520px,_100%)] flex-col">
       <div className="mb-4">
         <h2 className="text-lg font-semibold text-on-surface">Similar (Big 5)</h2>
+        {usingPrevSeason && (
+          <p className="mt-0.5 text-[11px] text-on-surface-variant">
+            {`Big 5 has no ${seasonLabel(season)} data yet — showing ${seasonLabel(
+              candidateSeason,
+            )}`}
+          </p>
+        )}
       </div>
 
       {showSkeleton && (

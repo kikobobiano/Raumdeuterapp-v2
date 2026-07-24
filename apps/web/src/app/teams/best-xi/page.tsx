@@ -551,7 +551,7 @@ export default function BestXIPage() {
         <aside className="flex min-w-0 flex-col gap-4">
           <GlassCard id="best-xi-filters-panel" className="flex flex-col gap-4 p-4">
             <p className="label-caps">Population & formation</p>
-            <FilterPanel />
+            <FilterPanel hideClubs />
 
             <div>
               <h3 className="mb-2 text-xs font-semibold uppercase tracking-widest text-content-muted">

@@ -273,10 +273,10 @@ export function TranslationGrid({ pools, playerName, playerAge, playerWyscoutId,
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [pools, playerName, playerAge, playerWyscoutId],
   );
-  const { item, state, onInitialized, containerRef } = useOverlayHoverByCurve(resolveHover);
+  const { item, state, onHover, onUnhover, onMouseMove, onInitialized, containerRef } = useOverlayHoverByCurve(resolveHover);
 
   return (
-    <div ref={containerRef} className="relative w-full">
+    <div ref={containerRef} className="relative w-full" onMouseMove={onMouseMove}>
       <Plot
         data={data as Plotly.Data[]}
         layout={{
@@ -302,6 +302,8 @@ export function TranslationGrid({ pools, playerName, playerAge, playerWyscoutId,
         style={{ width: "100%" }}
         useResizeHandler
         onInitialized={onInitialized}
+        onHover={onHover}
+        onUnhover={onUnhover}
       />
       {item && state && (
         <div

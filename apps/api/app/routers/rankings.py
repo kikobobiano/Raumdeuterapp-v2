@@ -25,13 +25,13 @@ def rankings(req: RankingsRequest) -> RankingsResponse:
         if req.metric not in set(selectable_metric_names(conn, view)):
             raise HTTPException(400, f"Unknown or unavailable metric: {req.metric}")
 
-        where_sql, params = build_where(req.filters)
+        vcols = column_names_in_view(conn, view)
+        where_sql, params = build_where(req.filters, cols=vcols)
         where = f"WHERE {where_sql}" if where_sql else ""
 
         metric_expr = metric_sql_expr(req.metric, req.mode)
         direction = "DESC" if req.desc else "ASC"
 
-        vcols = column_names_in_view(conn, view)
         age_sel = player_age_sql(vcols, req.filters.season)
 
         sql = f"""

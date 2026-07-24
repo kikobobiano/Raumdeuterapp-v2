@@ -12,6 +12,7 @@ import {
   type SquadHistoryRow,
 } from "@/components/charts/squad-value-history-chart";
 import { ClubLogoImg } from "@/components/domain/club-logo-img";
+import { SeasonSelect } from "@/components/domain/season-select";
 import {
   ExportButton,
   ExportFilterArea,
@@ -25,6 +26,7 @@ import { GlassCard } from "@/components/ui/glass-card";
 import { useDelayedLoading } from "@/hooks/use-delayed-loading";
 import { useScoutFiltersSidebar } from "@/hooks/use-scout-filters-sidebar";
 import { api } from "@/lib/api";
+import { squadValueSelectableLeagues } from "@/lib/squad-value-leagues";
 import { useGlobalFilters } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
@@ -112,10 +114,8 @@ export function SquadValueClient() {
     [router, pathname, searchParams],
   );
 
-  const pendingAutoSwapRef = React.useRef<"league-changed" | null>(null);
   const setLeague = (v: string) => {
-    pendingAutoSwapRef.current = "league-changed";
-    updateParams({ league: v || null });
+    updateParams({ league: v || null, club: null });
   };
   const setClub = (v: string) => updateParams({ club: v || null });
 
@@ -131,13 +131,14 @@ export function SquadValueClient() {
   });
 
   const clubsQ = useQuery({
-    queryKey: ["meta-teams", f.season, league || null],
+    enabled: !!league,
+    queryKey: ["meta-teams", f.season, league],
     queryFn: async () => {
       const { data, error } = await api.GET("/meta/teams", {
         params: {
           query: {
             season: f.season,
-            ...(league ? { league } : {}),
+            league,
           },
         },
       });
@@ -148,18 +149,27 @@ export function SquadValueClient() {
 
   const clubs = clubsQ.data ?? [];
 
+  const selectableLeagues = React.useMemo(
+    () => squadValueSelectableLeagues(leaguesQ.data ?? []),
+    [leaguesQ.data],
+  );
+
+  // `/meta/leagues` is sorted by power (strongest first); default on first load.
   React.useEffect(() => {
-    if (clubsQ.isPending || clubs.length === 0) return;
+    if (leaguesQ.isPending || selectableLeagues.length === 0) return;
+    if (league && selectableLeagues.includes(league)) return;
+    updateParams({
+      league: selectableLeagues[0],
+      club: null,
+    });
+  }, [league, selectableLeagues, leaguesQ.isPending, updateParams]);
+
+  // Default club to the first team in the league when none is selected.
+  React.useEffect(() => {
+    if (!league || clubsQ.isPending || clubs.length === 0) return;
     if (club && clubs.includes(club)) return;
-    if (pendingAutoSwapRef.current === "league-changed") {
-      pendingAutoSwapRef.current = null;
-      updateParams({ club: clubs[0] });
-      return;
-    }
-    if (club && !clubs.includes(club)) {
-      updateParams({ club: clubs[0] });
-    }
-  }, [clubs, club, clubsQ.isPending, updateParams]);
+    updateParams({ club: clubs[0] });
+  }, [league, clubs, club, clubsQ.isPending, updateParams]);
 
   const leagueQ = useQuery({
     enabled: !!league,
@@ -192,6 +202,8 @@ export function SquadValueClient() {
     return leagueQ.data.teams.find((t) => t.club === club) ?? null;
   }, [leagueQ.data, club]);
 
+  const xtvSupported = leagueQ.data?.xtv_supported ?? true;
+
   const scatterPoints: ScatterPoint[] = React.useMemo(() => {
     if (!leagueQ.data) return [];
     return leagueQ.data.teams.map((t) => ({
@@ -202,11 +214,29 @@ export function SquadValueClient() {
       position: `${t.n_players} players`,
       age: t.avg_age == null ? null : Math.round(t.avg_age),
       minutes: null,
-      x: t.avg_age ?? null,
-      y: t.total_xtv_eur ?? null,
-      size: t.avg_market_value_eur ?? null,
+      x: xtvSupported
+        ? (t.total_xtv_eur ?? null)
+        : (t.total_market_value_eur ?? null),
+      y: t.avg_age ?? null,
     }));
-  }, [leagueQ.data]);
+  }, [leagueQ.data, xtvSupported]);
+
+  const qualityScatterPoints: ScatterPoint[] = React.useMemo(() => {
+    if (!leagueQ.data || !xtvSupported) return [];
+    return leagueQ.data.teams
+      .map((t) => ({
+        wyscout_id: null,
+        player: t.club,
+        club: t.club,
+        league: t.league ?? leagueQ.data!.league,
+        position: `${t.n_players_500 ?? 0} players (500+ min)`,
+        age: t.avg_performance_index ?? null,
+        minutes: t.n_players_500 ?? null,
+        x: t.squad_xtv_zscore ?? null,
+        y: t.avg_performance_index ?? null,
+      }))
+      .filter((p) => p.x != null && p.y != null);
+  }, [leagueQ.data, xtvSupported]);
 
   const historyRows: SquadHistoryRow[] = React.useMemo(() => {
     if (!historyQ.data) return [];
@@ -244,9 +274,7 @@ export function SquadValueClient() {
                   <h3 className="mb-2 text-xs font-semibold uppercase tracking-widest text-content-muted">
                     Season
                   </h3>
-                  <p className="rounded bg-surface-mid/40 px-3 py-2 text-sm text-on-surface">
-                    {f.season}/{pad2((f.season + 1) % 100)}
-                  </p>
+                  <SeasonSelect />
                 </div>
 
                 <div>
@@ -254,7 +282,7 @@ export function SquadValueClient() {
                     League <span className="text-primary">*</span>
                   </h3>
                   <Combobox
-                    options={(leaguesQ.data ?? []).map((l) => ({
+                    options={selectableLeagues.map((l) => ({
                       value: l,
                       label: l,
                     }))}
@@ -368,11 +396,13 @@ export function SquadValueClient() {
                     value={fmtNum(selectedTeam?.avg_age ?? null, 1)}
                     hint={`${selectedTeam?.n_players ?? 0} players`}
                   />
-                  <KpiCard
-                    label="Total xTV"
-                    value={fmtEurCompact(selectedTeam?.total_xtv_eur)}
-                    hint={`avg ${fmtEurCompact(selectedTeam?.avg_xtv_eur)}`}
-                  />
+                  {xtvSupported ? (
+                    <KpiCard
+                      label="Total xTV"
+                      value={fmtEurCompact(selectedTeam?.total_xtv_eur)}
+                      hint={`avg ${fmtEurCompact(selectedTeam?.avg_xtv_eur)}`}
+                    />
+                  ) : null}
                   <KpiCard
                     label="Avg player value (TM)"
                     value={fmtEurCompact(selectedTeam?.avg_market_value_eur)}
@@ -388,13 +418,19 @@ export function SquadValueClient() {
 
               <ExportSection
                 id="league-scatter"
-                label="League scatter (age × xTV)"
+                label={
+                  xtvSupported
+                    ? "League scatter (xTV × age)"
+                    : "League scatter (squad value × age)"
+                }
                 defaultIncluded
               >
                 <GlassCard className="p-4 sm:p-6">
                   <div className="mb-3 flex items-baseline justify-between">
                     <h2 className="text-sm font-semibold uppercase tracking-widest text-content-muted">
-                      League comparison — avg age × total xTV
+                      {xtvSupported
+                        ? "League comparison — total xTV × avg age"
+                        : "League comparison — total squad value (TM) × avg age"}
                     </h2>
                     <span className="text-[11px] text-content-muted">
                       {leagueQ.data.teams.length} teams
@@ -402,13 +438,54 @@ export function SquadValueClient() {
                   </div>
                   <ScatterChart
                     points={scatterPoints}
-                    xLabel="Avg squad age"
-                    yLabel="Total squad xTV (€)"
+                    xLabel={
+                      xtvSupported ? "Total squad xTV (€)" : "Total squad value TM (€)"
+                    }
+                    yLabel="Avg squad age"
                     height={460}
-                    emphasiseTop
+                    highlightClubs={club ? [club] : []}
                   />
                 </GlassCard>
               </ExportSection>
+
+              {xtvSupported ? (
+                <ExportSection
+                  id="quality-scatter"
+                  label="League scatter (avg PI × xTV z-score)"
+                  defaultIncluded
+                >
+                  <GlassCard className="p-4 sm:p-6">
+                    <div className="mb-3 flex items-baseline justify-between gap-3">
+                      <div>
+                        <h2 className="text-sm font-semibold uppercase tracking-widest text-content-muted">
+                          League comparison — performance vs value
+                        </h2>
+                        <p className="mt-1 text-xs text-on-surface-variant">
+                          Squad total xTV z-score (500+ min) vs avg performance index; dotted line
+                          = linear regression
+                        </p>
+                      </div>
+                      <span className="shrink-0 text-[11px] text-content-muted">
+                        {qualityScatterPoints.length} teams
+                      </span>
+                    </div>
+                    {qualityScatterPoints.length === 0 ? (
+                      <div className="flex min-h-[20vh] items-center justify-center text-sm text-content-muted">
+                        Not enough data for this league (need 500+ min cohorts with xTV).
+                      </div>
+                    ) : (
+                      <ScatterChart
+                        points={qualityScatterPoints}
+                        xLabel="Squad xTV z-score (vs league)"
+                        yLabel="Avg performance index (500+ min)"
+                        height={460}
+                        highlightClubs={club ? [club] : []}
+                        showLinearRegression
+                      />
+                    )}
+                  </GlassCard>
+                </ExportSection>
+              ) : null}
 
               <ExportSection
                 id="history"
@@ -426,7 +503,7 @@ export function SquadValueClient() {
                       No multi-season history for this club.
                     </div>
                   ) : (
-                    <SquadValueHistoryChart rows={historyRows} />
+                    <SquadValueHistoryChart rows={historyRows} showXtv={xtvSupported} />
                   )}
                 </GlassCard>
               </ExportSection>

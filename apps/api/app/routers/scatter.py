@@ -38,15 +38,14 @@ def scatter(req: ScatterRequest) -> ScatterResponse:
     if req.size_metric:
         to_check.append(req.size_metric)
 
-    where_sql, params = build_where(req.filters)
-    where = f"WHERE {where_sql}" if where_sql else ""
-
     with duckdb_session() as conn:
         _ensure_metrics_allowed(conn, view, to_check)
+        vcols = column_names_in_view(conn, view)
+        where_sql, params = build_where(req.filters, cols=vcols)
+        where = f"WHERE {where_sql}" if where_sql else ""
 
         x_expr = metric_sql_expr(req.x_metric, req.x_mode)
         y_expr = metric_sql_expr(req.y_metric, req.y_mode)
-        vcols = column_names_in_view(conn, view)
         age_sel = player_age_sql(vcols, req.filters.season)
         cols = [
             '"Wyscout id" AS wyscout_id',

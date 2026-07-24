@@ -12,7 +12,7 @@ import { Shimmer, SkeletonBlock, SkeletonLine } from "@/components/ui/loading";
 import { metaSeasonsQueryOptions } from "@/lib/catalog-queries";
 import { api } from "@/lib/api";
 import {
-  orderMetricsByPreset,
+  POSITION_PRESETS,
   presetRoleForPosition,
 } from "@/lib/position-metric-presets";
 import { COMPARE_PALETTE } from "@/lib/compare-colors";
@@ -25,6 +25,12 @@ interface MetricRow {
   label: string;
   value: number | null;
   percentile: number | null;
+}
+
+function formatMetricLabel(metric: string): string {
+  return metric
+    .replace(/ per 90$/i, " /90")
+    .replace(/,/g, "");
 }
 
 interface Props {
@@ -99,25 +105,37 @@ export function ProfileComparePanel({
     [primaryPosition],
   );
 
-  const orderedTable = React.useMemo(() => {
-    const order = orderMetricsByPreset(
-      primaryTable.map((r) => r.metric),
-      presetRole,
-    );
-    const indexOf = new Map(order.map((m, i) => [m, i]));
-    return [...primaryTable].sort(
-      (a, b) => (indexOf.get(a.metric) ?? 1e9) - (indexOf.get(b.metric) ?? 1e9),
-    );
+  // Full role preset rows (not just intersection with primaryTable) so the
+  // side-by-side always shows the same metric list as the labelled preset.
+  const orderedTable = React.useMemo((): MetricRow[] => {
+    const preset = POSITION_PRESETS[presetRole] ?? POSITION_PRESETS.Midfielder;
+    const byMetric = new Map(primaryTable.map((r) => [r.metric, r]));
+    return preset.map((metric) => {
+      const existing = byMetric.get(metric);
+      if (existing) return existing;
+      return {
+        metric,
+        label: formatMetricLabel(metric),
+        value: null,
+        percentile: null,
+      };
+    });
   }, [primaryTable, presetRole]);
 
   const queries = useQueries({
     queries: slots.map((s) => ({
-      queryKey: ["profile", s.wyscoutId, s.club, compareSeason],
+      // table_role pins comparison players to the primary preset so a CB
+      // still returns Forward metrics when comparing against a striker.
+      queryKey: ["profile", s.wyscoutId, s.club, compareSeason, presetRole],
       queryFn: async () => {
         const { data, error } = await api.GET("/players/{wyscout_id}/profile", {
           params: {
             path: { wyscout_id: s.wyscoutId },
-            query: { season: compareSeason, club: s.club ?? undefined },
+            query: {
+              season: compareSeason,
+              club: s.club ?? undefined,
+              table_role: presetRole,
+            },
           },
         });
         if (error) throw new Error(JSON.stringify(error));

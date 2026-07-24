@@ -123,10 +123,10 @@ export function ProgressionChart({ series, seasons, playerWyscoutId, playerImage
     },
     [series, playerWyscoutId, playerName],
   );
-  const { item, state, onInitialized, containerRef } = useOverlayHoverByCurve(resolveHover);
+  const { item, state, onHover, onUnhover, onMouseMove, onInitialized, containerRef } = useOverlayHoverByCurve(resolveHover);
 
   return (
-    <div ref={containerRef} className="relative w-full">
+    <div ref={containerRef} className="relative w-full" onMouseMove={onMouseMove}>
       <Plot
         data={data}
         layout={{
@@ -164,6 +164,8 @@ export function ProgressionChart({ series, seasons, playerWyscoutId, playerImage
         style={{ width: "100%" }}
         useResizeHandler
         onInitialized={onInitialized}
+        onHover={onHover}
+        onUnhover={onUnhover}
       />
       {item && state && (
         <div

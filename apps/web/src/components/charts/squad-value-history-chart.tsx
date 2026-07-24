@@ -3,6 +3,12 @@
 import dynamic from "next/dynamic";
 import * as React from "react";
 
+import {
+  OverlayCard,
+  type OverlayCardData,
+  TRANSPARENT_HOVERLABEL,
+  useOverlayHoverByCurve,
+} from "@/components/charts/hover-overlay";
 import { plotlySansFontFamily } from "@/lib/plotly-font";
 import { PLOTLY_APP_CONFIG } from "@/lib/plotly-config";
 
@@ -35,9 +41,11 @@ function fmtEurCompact(n: number | null | undefined): string {
 interface Props {
   rows: SquadHistoryRow[];
   height?: number;
+  /** When false, bars show total TM squad value instead of xTV. */
+  showXtv?: boolean;
 }
 
-export function SquadValueHistoryChart({ rows, height = 360 }: Props) {
+export function SquadValueHistoryChart({ rows, height = 360, showXtv = true }: Props) {
   const sans = plotlySansFontFamily();
   const sorted = React.useMemo(
     () => [...rows].sort((a, b) => a.season - b.season),
@@ -45,27 +53,21 @@ export function SquadValueHistoryChart({ rows, height = 360 }: Props) {
   );
   const x = sorted.map((r) => seasonLabel(r.season));
 
+  const barLabel = showXtv ? "Total xTV" : "Total squad value (TM)";
+  const barValues = sorted.map((r) =>
+    showXtv ? r.total_xtv_eur : r.total_market_value_eur,
+  );
+
   const data = React.useMemo(
     () => [
       {
         type: "bar" as const,
-        name: "Total xTV",
+        name: barLabel,
         x,
-        y: sorted.map((r) => r.total_xtv_eur),
+        y: barValues,
         marker: { color: "#14d1ff", opacity: 0.85 },
         yaxis: "y",
-        hovertemplate: "<b>%{x}</b><br>Total xTV: %{y:,.0f} €<extra></extra>",
-      },
-      {
-        type: "scatter" as const,
-        mode: "lines+markers" as const,
-        name: "Avg player value",
-        x,
-        y: sorted.map((r) => r.avg_market_value_eur),
-        line: { color: "#e879f9", width: 2, dash: "dot" as const },
-        marker: { size: 7, color: "#e879f9" },
-        yaxis: "y",
-        hovertemplate: "<b>%{x}</b><br>Avg MV: %{y:,.0f} €<extra></extra>",
+        hoverinfo: "none" as const,
       },
       {
         type: "scatter" as const,
@@ -76,11 +78,39 @@ export function SquadValueHistoryChart({ rows, height = 360 }: Props) {
         line: { color: "#ffd5ae", width: 2 },
         marker: { size: 7, color: "#ffd5ae" },
         yaxis: "y2",
-        hovertemplate: "<b>%{x}</b><br>Avg age: %{y:.1f}<extra></extra>",
+        hoverinfo: "none" as const,
       },
     ],
-    [x, sorted],
+    [x, sorted, barLabel, barValues],
   );
+
+  const resolveHover = React.useCallback(
+    (_curve: number, idx: number): OverlayCardData | null => {
+      const r = sorted[idx];
+      if (!r) return null;
+      const valueRow = showXtv
+        ? { label: "Total xTV", value: fmtEurCompact(r.total_xtv_eur) }
+        : {
+            label: "Total squad value (TM)",
+            value: fmtEurCompact(r.total_market_value_eur),
+          };
+      return {
+        name: seasonLabel(r.season),
+        color: "#14d1ff",
+        rows: [
+          valueRow,
+          {
+            label: "Avg age",
+            value: r.avg_age != null ? r.avg_age.toFixed(1) : "—",
+          },
+        ],
+      };
+    },
+    [sorted, showXtv],
+  );
+
+  const { item, state, onHover, onUnhover, onMouseMove, onInitialized, containerRef } =
+    useOverlayHoverByCurve(resolveHover);
 
   const layout = React.useMemo(
     () => ({
@@ -92,8 +122,12 @@ export function SquadValueHistoryChart({ rows, height = 360 }: Props) {
       font: { family: sans, color: "#d2e2f2", size: 12 },
       dragmode: false as const,
       hovermode: "x unified" as const,
-      barmode: "group" as const,
+      showlegend: false,
+      hoverlabel: TRANSPARENT_HOVERLABEL,
       xaxis: {
+        type: "category" as const,
+        categoryorder: "array" as const,
+        categoryarray: x,
         title: { text: "Season" },
         gridcolor: "rgba(255,255,255,0.05)",
         fixedrange: true,
@@ -113,31 +147,41 @@ export function SquadValueHistoryChart({ rows, height = 360 }: Props) {
         fixedrange: true,
         rangemode: "tozero" as const,
       },
-      legend: { orientation: "h" as const, x: 0, y: 1.12 },
     }),
-    [height, sans],
+    [height, sans, x],
   );
 
   return (
-    <div className="w-full">
+    <div ref={containerRef} className="relative w-full" onMouseMove={onMouseMove}>
       <Plot
         data={data}
         layout={layout}
         config={PLOTLY_APP_CONFIG}
         style={{ width: "100%" }}
         useResizeHandler
+        onInitialized={onInitialized}
+        onHover={onHover}
+        onUnhover={onUnhover}
       />
-      <div className="mt-2 grid grid-cols-3 gap-2 text-[11px] text-content-muted">
-        <div>Bars: total squad xTV</div>
-        <div>Dotted: avg player value</div>
-        <div>Line: avg age (right axis)</div>
-      </div>
+      {item && state && (
+        <div
+          className="pointer-events-none absolute z-50"
+          style={{
+            left: Math.min(state.x + 14, (containerRef.current?.clientWidth ?? 0) - 272),
+            top: Math.max(state.y - 64, 4),
+          }}
+        >
+          <OverlayCard data={item} />
+        </div>
+      )}
       <div className="sr-only">
         {sorted.map((r) => (
           <span key={r.season}>
-            {seasonLabel(r.season)}: total xTV {fmtEurCompact(r.total_xtv_eur)}, avg MV{" "}
-            {fmtEurCompact(r.avg_market_value_eur)}, avg age{" "}
-            {r.avg_age?.toFixed(1) ?? "—"}.
+            {seasonLabel(r.season)}:{" "}
+            {showXtv
+              ? `total xTV ${fmtEurCompact(r.total_xtv_eur)}`
+              : `total TM value ${fmtEurCompact(r.total_market_value_eur)}`}
+            , avg age {r.avg_age?.toFixed(1) ?? "—"}.
           </span>
         ))}
       </div>

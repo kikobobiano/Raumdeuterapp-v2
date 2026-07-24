@@ -119,7 +119,13 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Teams */
+        /**
+         * Teams
+         * @description Distinct clubs for a season, optionally scoped to one or more leagues.
+         *
+         *     ``leagues`` (repeated query param) takes precedence over the legacy single
+         *     ``league`` param; passing neither returns every club in the season.
+         */
         get: operations["teams_meta_teams_get"];
         put?: never;
         post?: never;
@@ -330,6 +336,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/scouting/discover": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Discover */
+        post: operations["discover_scouting_discover_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/scouting/standouts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Standouts
+         * @description Rank players who perform furthest above the selected league's average.
+         */
+        post: operations["standouts_scouting_standouts_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/players/{wyscout_id}/progression": {
         parameters: {
             query?: never;
@@ -475,6 +518,23 @@ export interface paths {
         };
         /** Minutes Distribution League */
         get: operations["minutes_distribution_league_teams_minutes_distribution_league_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/teams/minutes-distribution/leagues": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Minutes Distribution Leagues */
+        get: operations["minutes_distribution_leagues_teams_minutes_distribution_leagues_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -819,6 +879,180 @@ export interface components {
             /** Player Image Url */
             player_image_url?: string | null;
         };
+        /** CompositeComponent */
+        CompositeComponent: {
+            /** Metric */
+            metric: string;
+            /**
+             * Mode
+             * @default as_is
+             * @enum {string}
+             */
+            mode: "raw" | "p90" | "as_is";
+            /**
+             * Basis
+             * @default value
+             * @enum {string}
+             */
+            basis: "value" | "team_median";
+            /**
+             * Weight
+             * @default 1
+             */
+            weight: number;
+        };
+        /** DiscoverClusterSummary */
+        DiscoverClusterSummary: {
+            /** Cluster Id */
+            cluster_id: number;
+            /** Label */
+            label: string;
+            /** N Members */
+            n_members: number;
+        };
+        /** DiscoverCohortInfo */
+        DiscoverCohortInfo: {
+            /** N */
+            n: number;
+            /**
+             * Tier Used
+             * @enum {string}
+             */
+            tier_used: "position_tier" | "position_league" | "position_global";
+            /** Min Minutes */
+            min_minutes: number;
+            /**
+             * Fallback Applied
+             * @default false
+             */
+            fallback_applied: boolean;
+        };
+        /** DiscoverMetricValue */
+        DiscoverMetricValue: {
+            /** Metric */
+            metric: string;
+            /** Value */
+            value: number | null;
+            /** Z */
+            z: number | null;
+            /** Percentile */
+            percentile?: number | null;
+        };
+        /** DiscoverPCAInfo */
+        DiscoverPCAInfo: {
+            /** Explained Variance */
+            explained_variance: number[];
+            /** Loadings */
+            loadings: number[][];
+        };
+        /** DiscoverRequest */
+        DiscoverRequest: {
+            filters: components["schemas"]["PlayerFilters"];
+            /** Metrics */
+            metrics: components["schemas"]["ScoutingMetricSpec"][];
+            /**
+             * Normalization
+             * @default zscore
+             * @enum {string}
+             */
+            normalization: "zscore" | "percentile";
+            /**
+             * Cohort Tier
+             * @default position_tier
+             * @enum {string}
+             */
+            cohort_tier: "position_tier" | "position_league" | "position_global";
+            /**
+             * Archetype
+             * @default pca_kmeans
+             * @enum {string}
+             */
+            archetype: "pca_kmeans" | "none";
+            /**
+             * K Clusters
+             * @default 4
+             */
+            k_clusters: number;
+            /** Club Fit Team */
+            club_fit_team?: string | null;
+            /**
+             * Club Fit Weight
+             * @default 0.3
+             */
+            club_fit_weight: number;
+            /**
+             * Limit
+             * @default 50
+             */
+            limit: number;
+            /**
+             * Offset
+             * @default 0
+             */
+            offset: number;
+        };
+        /** DiscoverResponse */
+        DiscoverResponse: {
+            /** Rows */
+            rows: components["schemas"]["DiscoverRow"][];
+            /** Total */
+            total: number;
+            cohort: components["schemas"]["DiscoverCohortInfo"];
+            pca?: components["schemas"]["DiscoverPCAInfo"] | null;
+            /** Clusters */
+            clusters?: components["schemas"]["DiscoverClusterSummary"][];
+            /** Silhouette */
+            silhouette?: number | null;
+            /** Metric Labels */
+            metric_labels?: {
+                [key: string]: string;
+            };
+        };
+        /** DiscoverRow */
+        DiscoverRow: {
+            /** Wyscout Id */
+            wyscout_id: number | null;
+            /** Player */
+            player: string;
+            /** Club */
+            club: string | null;
+            /** Club Logo */
+            club_logo?: string | null;
+            /** League */
+            league: string | null;
+            /** Position */
+            position: string | null;
+            /** Age */
+            age: number | null;
+            /** Minutes */
+            minutes: number | null;
+            /** Height */
+            height?: number | null;
+            /** Foot */
+            foot?: string | null;
+            /** Passport Country */
+            passport_country?: string | null;
+            /** Contract Expires */
+            contract_expires?: string | null;
+            /** X Tv Eur */
+            x_tv_eur?: number | null;
+            /** Player Image Url */
+            player_image_url?: string | null;
+            /** Composite Score */
+            composite_score: number;
+            /** Style Fit */
+            style_fit?: number | null;
+            /** Cluster Id */
+            cluster_id?: number | null;
+            /** Pca X */
+            pca_x?: number | null;
+            /** Pca Y */
+            pca_y?: number | null;
+            /** Pca Z */
+            pca_z?: number | null;
+            /** Metric Values */
+            metric_values: components["schemas"]["DiscoverMetricValue"][];
+        };
         /** GameAreaProfileBlock */
         GameAreaProfileBlock: {
             /** Area */
@@ -869,6 +1103,17 @@ export interface components {
             zone_shares: components["schemas"]["ZoneShares"];
         };
         /**
+         * LeagueMedianBand
+         * @description Median squad age-band shares across clubs in one league.
+         */
+        LeagueMedianBand: {
+            /** League */
+            league: string;
+            /** N Clubs */
+            n_clubs: number;
+            median_zone_shares: components["schemas"]["ZoneShares"];
+        };
+        /**
          * LeagueMinutesOverviewResponse
          * @description League-wide minutes overview: one row per club, with each club's squad
          *     minutes broken down by age band (% of that club's total minutes). Sorted by
@@ -883,6 +1128,13 @@ export interface components {
             max_league_games: number;
             /** Max League Minutes */
             max_league_minutes: number;
+            /**
+             * Domestic Only
+             * @default false
+             */
+            domestic_only: boolean;
+            /** Domestic Country */
+            domestic_country?: string | null;
             /** Clubs */
             clubs: components["schemas"]["LeagueClubBand"][];
         };
@@ -900,6 +1152,27 @@ export interface components {
              * @description Cosine similarity in z-scored style space (higher = closer fit).
              */
             style_fit: number;
+        };
+        /**
+         * LeaguesMinutesOverviewResponse
+         * @description Cross-league overview: one row per league with median zone shares across
+         *     its clubs. Sorted by ``sort_by`` band descending, tie-broken alphabetically.
+         */
+        LeaguesMinutesOverviewResponse: {
+            /** Season */
+            season: number;
+            /**
+             * Sort By
+             * @enum {string}
+             */
+            sort_by: "youth" | "peak" | "experienced" | "veteran";
+            /**
+             * Domestic Only
+             * @default false
+             */
+            domestic_only: boolean;
+            /** Leagues */
+            leagues: components["schemas"]["LeagueMedianBand"][];
         };
         /** MetricOption */
         MetricOption: {
@@ -969,6 +1242,16 @@ export interface components {
             /** Max League Minutes */
             max_league_minutes: number;
             zone_shares: components["schemas"]["ZoneShares"];
+            /**
+             * Domestic Only
+             * @default false
+             */
+            domestic_only: boolean;
+            /**
+             * Domestic Country
+             * @description Primary domestic passport label for this league (e.g. England).
+             */
+            domestic_country?: string | null;
             /** Players */
             players: components["schemas"]["MinutesDistributionPlayer"][];
         };
@@ -1028,6 +1311,19 @@ export interface components {
             contract_expires_year_min?: number | null;
             /** Contract Expires Year Max */
             contract_expires_year_max?: number | null;
+            /** Xtv Min Eur */
+            xtv_min_eur?: number | null;
+            /** Xtv Max Eur */
+            xtv_max_eur?: number | null;
+            /** Height Min */
+            height_min?: number | null;
+            /** Height Max */
+            height_max?: number | null;
+            /**
+             * Passport Countries
+             * @description Passport country in this list (exact match on Wyscout "Passport country" column when present in the view).
+             */
+            passport_countries?: string[] | null;
         };
         /** PlayerListItem */
         PlayerListItem: {
@@ -1464,6 +1760,24 @@ export interface components {
             /** N */
             n: number;
         };
+        /** ScoutingMetricSpec */
+        ScoutingMetricSpec: {
+            /** Metric */
+            metric: string;
+            /**
+             * Mode
+             * @default as_is
+             * @enum {string}
+             */
+            mode: "raw" | "p90" | "as_is";
+            /**
+             * Weight
+             * @default 1
+             */
+            weight: number;
+            /** Threshold Z */
+            threshold_z?: number | null;
+        };
         /** ScreenerCriterion */
         ScreenerCriterion: {
             /** Metric */
@@ -1482,8 +1796,20 @@ export interface components {
         /** ScreenerRequest */
         ScreenerRequest: {
             filters: components["schemas"]["PlayerFilters"];
+            /**
+             * Seasons
+             * @description Optional multi-season set. Empty → filters.season only.
+             */
+            seasons?: number[];
             /** Criteria */
             criteria?: components["schemas"]["ScreenerCriterion"][];
+            /** Composite */
+            composite?: components["schemas"]["CompositeComponent"][];
+            /**
+             * Sort By Composite
+             * @default false
+             */
+            sort_by_composite: boolean;
             /** Sort By */
             sort_by?: string | null;
             /**
@@ -1517,6 +1843,8 @@ export interface components {
         };
         /** ScreenerRow */
         ScreenerRow: {
+            /** Season */
+            season: number;
             /** Wyscout Id */
             wyscout_id: number | null;
             /** Club Logo */
@@ -1537,11 +1865,19 @@ export interface components {
             metrics: {
                 [key: string]: number | null;
             };
+            /** Composite */
+            composite?: number | null;
         };
         /** SquadValueHistoryResponse */
         SquadValueHistoryResponse: {
             /** Club */
             club: string;
+            /**
+             * Xtv Supported
+             * @description False when the club has no xTV-eligible seasons in the response.
+             * @default true
+             */
+            xtv_supported: boolean;
             /** Rows */
             rows: components["schemas"]["SquadValueHistoryRow"][];
         };
@@ -1570,6 +1906,22 @@ export interface components {
              * @description Share (0-1) of players whose Passport country differs from the modal squad passport.
              */
             foreign_share?: number | null;
+            /**
+             * N Players 500
+             * @description Players with at least 500 minutes (quality cohort for PI / xTV z-score).
+             * @default 0
+             */
+            n_players_500: number;
+            /**
+             * Avg Performance Index
+             * @description Mean performance_index among players with >= 500 minutes.
+             */
+            avg_performance_index?: number | null;
+            /**
+             * Squad Xtv Zscore
+             * @description Z-score of total squad xTV (500+ min cohort) vs league mean.
+             */
+            squad_xtv_zscore?: number | null;
             /** Season */
             season: number;
         };
@@ -1579,6 +1931,12 @@ export interface components {
             season: number;
             /** League */
             league: string;
+            /**
+             * Xtv Supported
+             * @description False when xTV is not offered for this league (e.g. Campeonato de Portugal).
+             * @default true
+             */
+            xtv_supported: boolean;
             /** Teams */
             teams: components["schemas"]["SquadValueTeamRow"][];
         };
@@ -1610,6 +1968,113 @@ export interface components {
              * @description Share (0-1) of players whose Passport country differs from the modal squad passport.
              */
             foreign_share?: number | null;
+            /**
+             * N Players 500
+             * @description Players with at least 500 minutes (quality cohort for PI / xTV z-score).
+             * @default 0
+             */
+            n_players_500: number;
+            /**
+             * Avg Performance Index
+             * @description Mean performance_index among players with >= 500 minutes.
+             */
+            avg_performance_index?: number | null;
+            /**
+             * Squad Xtv Zscore
+             * @description Z-score of total squad xTV (500+ min cohort) vs league mean.
+             */
+            squad_xtv_zscore?: number | null;
+        };
+        /** StandoutDimension */
+        StandoutDimension: {
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /** Value */
+            value: number | null;
+            /** Z */
+            z: number | null;
+            /** Percentile */
+            percentile?: number | null;
+        };
+        /** StandoutRequest */
+        StandoutRequest: {
+            filters: components["schemas"]["PlayerFilters"];
+            /**
+             * Signal
+             * @default overall
+             * @enum {string}
+             */
+            signal: "overall" | "metrics";
+            /** Metrics */
+            metrics?: components["schemas"]["ScoutingMetricSpec"][];
+            /**
+             * Min Standout Z
+             * @description Keep players at least this many σ above the league average.
+             * @default 1
+             */
+            min_standout_z: number;
+            /**
+             * Limit
+             * @default 50
+             */
+            limit: number;
+        };
+        /** StandoutResponse */
+        StandoutResponse: {
+            /** Rows */
+            rows: components["schemas"]["StandoutRow"][];
+            /** Total */
+            total: number;
+            /** League */
+            league?: string | null;
+            /** Cohort N */
+            cohort_n: number;
+            /** Min Minutes */
+            min_minutes: number;
+            /**
+             * Signal
+             * @enum {string}
+             */
+            signal: "overall" | "metrics";
+            /** Distribution */
+            distribution?: number[];
+            /** League Mean */
+            league_mean?: number | null;
+            /** League Sd */
+            league_sd?: number | null;
+            /** Metric Labels */
+            metric_labels?: {
+                [key: string]: string;
+            };
+        };
+        /** StandoutRow */
+        StandoutRow: {
+            /** Wyscout Id */
+            wyscout_id: number | null;
+            /** Player */
+            player: string;
+            /** Club */
+            club: string | null;
+            /** Club Logo */
+            club_logo?: string | null;
+            /** League */
+            league: string | null;
+            /** Position */
+            position: string | null;
+            /** Age */
+            age: number | null;
+            /** Minutes */
+            minutes: number | null;
+            /** Player Image Url */
+            player_image_url?: string | null;
+            /** Performance Index */
+            performance_index?: number | null;
+            /** Standout Score */
+            standout_score: number;
+            /** Dimensions */
+            dimensions?: components["schemas"]["StandoutDimension"][];
         };
         /** StrengthAdjustment */
         StrengthAdjustment: {
@@ -1982,6 +2447,7 @@ export interface operations {
             query: {
                 season: number;
                 league?: string | null;
+                leagues?: string[] | null;
             };
             header?: never;
             path?: never;
@@ -2021,6 +2487,8 @@ export interface operations {
                 offset?: number;
                 /** @description Filter by leagues */
                 leagues?: string[] | null;
+                /** @description Filter by clubs */
+                teams?: string[] | null;
                 /** @description Filter by tactical roles */
                 roles?: string[] | null;
                 age_min?: number | null;
@@ -2279,6 +2747,8 @@ export interface operations {
                 /** @description Percentile cohort league; omit to use this player's league */
                 league?: string | null;
                 min_minutes?: number;
+                /** @description Override which role preset builds profile.table. Used by Compare so a player from another position still returns the primary preset metrics. */
+                table_role?: string | null;
                 /** @description When set, include up to N PI trajectory seasons inside this response. */
                 performance_index_history_limit?: number | null;
                 /** @description When set, include up to N xTV trajectory seasons inside this response. */
@@ -2365,6 +2835,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ScreenerResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    discover_scouting_discover_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DiscoverRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DiscoverResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    standouts_scouting_standouts_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StandoutRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StandoutResponse"];
                 };
             };
             /** @description Validation Error */
@@ -2618,6 +3154,8 @@ export interface operations {
                 season: number;
                 /** @description Club name as stored in parquet `club` */
                 club: string;
+                /** @description When true, age-band shares count only domestic-passport minutes */
+                domestic_only?: boolean;
             };
             header?: never;
             path?: never;
@@ -2652,6 +3190,8 @@ export interface operations {
                 season: number;
                 /** @description League name as stored in parquet `league` */
                 league: string;
+                /** @description When true, age-band shares count only domestic-passport minutes */
+                domestic_only?: boolean;
             };
             header?: never;
             path?: never;
@@ -2666,6 +3206,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LeagueMinutesOverviewResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    minutes_distribution_leagues_teams_minutes_distribution_leagues_get: {
+        parameters: {
+            query: {
+                /** @description Season start year (e.g. 2025 for 25-26) */
+                season: number;
+                /** @description Age band used to rank leagues (median share across clubs) */
+                sort_by?: "youth" | "peak" | "experienced" | "veteran";
+                /** @description When true, age-band shares count only domestic-passport minutes */
+                domestic_only?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LeaguesMinutesOverviewResponse"];
                 };
             };
             /** @description Validation Error */

@@ -32,6 +32,10 @@ REQUEST_DELAY_SEC = 0.1
 # Wyscout search: only players with at least this many minutes in the selected timeframe.
 MINUTES_ON_FIELD_MIN = 0
 
+# Season names already downloaded — skip a league when its latest season falls here.
+# Add newly-completed seasons after a successful run to avoid re-downloading them.
+ALREADY_DOWNLOADED_SEASON_NAMES: set[str] = {"2025/2026"}
+
 # Decoded `columns` from the reference curl (same field list).
 COLUMNS = (
     "name,id,image,current_team_logo,current_team_color,birth_country_name,"
@@ -399,6 +403,22 @@ def season_slug(wyscout_season_name: str) -> str:
     return wyscout_season_name.strip()
 
 
+def season_end_year(wyscout_season_name: str) -> int:
+    """Ending calendar year of a season name; used to pick the newest season.
+
+    e.g. "2025/2026" -> 2026, "2026" -> 2026.
+    """
+    m = re.match(r"^(\d{4})/(\d{4})$", wyscout_season_name.strip())
+    if m:
+        return int(m.group(2))
+    return int(wyscout_season_name.strip())
+
+
+def latest_season_id(season_ids: list[int]) -> int:
+    """Return the season_id with the newest season name from SEASON_WYSCOUT_NAME."""
+    return max(season_ids, key=lambda sid: season_end_year(SEASON_WYSCOUT_NAME[sid]))
+
+
 def safe_filename_stem(league_name: str, season_part: str) -> str:
     raw = f"{league_name} {season_part}".strip()
     for ch in '\\/:*?"<>|':
@@ -625,6 +645,17 @@ def main() -> None:
         if not season_ids:
             print(f"Skipping {league_name}: no season_ids configured")
             continue
+
+        # Only download the latest season (2026/2027 or 2026), regardless of how
+        # many season_ids are configured for the league.
+        latest_sid = latest_season_id(season_ids)
+        latest_name = SEASON_WYSCOUT_NAME[latest_sid]
+        if latest_name in ALREADY_DOWNLOADED_SEASON_NAMES:
+            print(
+                f"Skipping {league_name}: latest season {latest_name} already downloaded"
+            )
+            continue
+        season_ids = [latest_sid]
 
         for sid in season_ids:
             wy_name = SEASON_WYSCOUT_NAME.get(sid)

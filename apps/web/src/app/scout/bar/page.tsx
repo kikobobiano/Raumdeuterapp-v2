@@ -74,6 +74,7 @@ export default function BarPage() {
       "bar-ranking",
       f.season,
       f.leagues,
+      f.clubs,
       rolesPayload,
       f.ageMin,
       f.ageMax,
@@ -87,6 +88,7 @@ export default function BarPage() {
           filters: {
             season: f.season,
             leagues: f.leagues.length ? f.leagues : null,
+            teams: f.clubs.length ? f.clubs : null,
             roles: rolesPayload.length ? rolesPayload : null,
             age_min: f.ageMin,
             age_max: f.ageMax,

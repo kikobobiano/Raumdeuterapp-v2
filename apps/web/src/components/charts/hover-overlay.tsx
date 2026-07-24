@@ -11,17 +11,23 @@ export interface OverlayHoverState {
   y: number;
 }
 
+type PlotHoverPayload = Readonly<{
+  points?: ReadonlyArray<{
+    pointIndex?: number;
+    curveNumber?: number;
+  }>;
+  event?: MouseEvent;
+}>;
+
 interface PlotlyDiv extends HTMLElement {
-  on?: (ev: string, cb: (e: { points?: { pointIndex?: number; curveNumber?: number }[] }) => void) => void;
-  removeListener?: (
-    ev: string,
-    cb: (e: { points?: { pointIndex?: number; curveNumber?: number }[] }) => void,
-  ) => void;
+  on?: (ev: string, cb: (e: PlotHoverPayload) => void) => void;
+  removeListener?: (ev: string, cb: (e: PlotHoverPayload) => void) => void;
 }
 
 /**
- * Listens to plotly_hover via gd.on() (most reliable across react-plotly versions),
- * and tracks cursor via mousemove on a container div for absolute overlay positioning.
+ * Custom overlay hover for Plotly charts.
+ * Wires both react-plotly ``onHover`` and ``gd.on('plotly_hover')`` — scattergl
+ * often only fires the latter.
  */
 export function useOverlayHover<T>(items: T[], opts?: { trace?: number }) {
   const resolver = React.useCallback(
@@ -34,10 +40,6 @@ export function useOverlayHover<T>(items: T[], opts?: { trace?: number }) {
   return useOverlayHoverByCurve<T>(resolver);
 }
 
-/**
- * Variant that resolves the hovered item by (curveNumber, pointIndex) — use for charts
- * with multiple traces where a single index isn't enough.
- */
 export function useOverlayHoverByCurve<T>(
   resolve: (curveNumber: number, pointIndex: number) => T | null,
 ) {
@@ -45,36 +47,82 @@ export function useOverlayHoverByCurve<T>(
   const containerRef = React.useRef<HTMLDivElement | null>(null);
   const resolveRef = React.useRef(resolve);
   resolveRef.current = resolve;
+  const lastItemRef = React.useRef<T | null>(null);
+  const cleanupRef = React.useRef<(() => void) | null>(null);
 
-  const onInitialized = React.useCallback((_fig: unknown, gd: HTMLElement) => {
-    const div = gd as PlotlyDiv;
+  const positionFromEvent = React.useCallback((ev: MouseEvent | undefined) => {
     const root = containerRef.current;
-    if (!root) return;
-    let lastItem: T | null = null;
-    const onHover = (e: { points?: { pointIndex?: number; curveNumber?: number }[] }) => {
-      const p = e.points?.[0];
+    if (!root) return { x: 0, y: 0 };
+    const rect = root.getBoundingClientRect();
+    if (ev) {
+      return { x: ev.clientX - rect.left, y: ev.clientY - rect.top };
+    }
+    return { x: rect.width / 2, y: rect.height / 2 };
+  }, []);
+
+  const applyHover = React.useCallback(
+    (ev: PlotHoverPayload) => {
+      const p = ev.points?.[0];
       if (!p) return;
       const ci = p.curveNumber;
       const pi = p.pointIndex;
       if (ci == null || pi == null) return;
       const r = resolveRef.current(ci, pi);
-      if (r != null) lastItem = r;
-    };
-    const onUnhover = () => {
-      lastItem = null;
-      setState(null);
-    };
-    const onMove = (ev: MouseEvent) => {
-      if (lastItem == null) return;
-      const rect = root.getBoundingClientRect();
-      setState({ item: lastItem, x: ev.clientX - rect.left, y: ev.clientY - rect.top });
-    };
-    div.on?.("plotly_hover", onHover);
-    div.on?.("plotly_unhover", onUnhover);
-    root.addEventListener("mousemove", onMove);
+      if (r == null) return;
+      lastItemRef.current = r;
+      const { x, y } = positionFromEvent(ev.event);
+      setState({ item: r, x, y });
+    },
+    [positionFromEvent],
+  );
+
+  const onHover = React.useCallback(
+    (ev: PlotHoverPayload) => applyHover(ev),
+    [applyHover],
+  );
+
+  const onUnhover = React.useCallback(() => {
+    lastItemRef.current = null;
+    setState(null);
   }, []);
 
-  return { item: state?.item ?? null, state, onInitialized, containerRef };
+  const onMouseMove = React.useCallback((ev: React.MouseEvent<HTMLDivElement>) => {
+    if (lastItemRef.current == null) return;
+    const root = containerRef.current;
+    if (!root) return;
+    const rect = root.getBoundingClientRect();
+    setState({
+      item: lastItemRef.current,
+      x: ev.clientX - rect.left,
+      y: ev.clientY - rect.top,
+    });
+  }, []);
+
+  const onInitialized = React.useCallback(
+    (_fig: unknown, gd: HTMLElement) => {
+      cleanupRef.current?.();
+      const div = gd as PlotlyDiv;
+      div.on?.("plotly_hover", applyHover);
+      div.on?.("plotly_unhover", onUnhover);
+      cleanupRef.current = () => {
+        div.removeListener?.("plotly_hover", applyHover);
+        div.removeListener?.("plotly_unhover", onUnhover);
+      };
+    },
+    [applyHover, onUnhover],
+  );
+
+  React.useEffect(() => () => cleanupRef.current?.(), []);
+
+  return {
+    item: state?.item ?? null,
+    state,
+    containerRef,
+    onHover,
+    onUnhover,
+    onMouseMove,
+    onInitialized,
+  };
 }
 
 export interface OverlayCardData {
@@ -85,12 +133,10 @@ export interface OverlayCardData {
   age?: number | null;
   value?: string | null;
   valueLabel?: string | null;
-  /** Extra metric lines shown below identity (e.g. metric: value pairs). */
   rows?: { label: string; value: string }[];
   color?: string | null;
   clubLogoUrl?: string | null;
   imageUrl?: string | null;
-  /** Fallback portrait via Wyscout public portrait when imageUrl missing. */
   wyscoutId?: number | null;
 }
 
@@ -175,7 +221,6 @@ export function OverlayCard({ data }: { data: OverlayCardData }) {
   );
 }
 
-/** Flat hoverlabel that hides plotly's native tooltip while keeping hover events. */
 export const TRANSPARENT_HOVERLABEL = {
   bgcolor: "rgba(0,0,0,0)",
   bordercolor: "rgba(0,0,0,0)",
