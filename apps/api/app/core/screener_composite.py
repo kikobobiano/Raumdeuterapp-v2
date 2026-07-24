@@ -218,6 +218,42 @@ def score_candidates(
     return out
 
 
+def component_select_exprs(
+    components: list[CompositeInput],
+    *,
+    alias_prefix: str = "_comp",
+) -> tuple[dict[str, str], dict[str, str]]:
+    """Return ``(alias -> sql_expr, metric_aliases)`` for composite component columns."""
+    metric_aliases: dict[str, str] = {}
+    select_exprs: dict[str, str] = {}
+    seen_keys: set[str] = set()
+    comp_idx = 0
+    for metric, mode, basis, _w in components:
+        key = _component_key(metric, mode, basis)
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        alias = f"{alias_prefix}{comp_idx}"
+        comp_idx += 1
+        metric_aliases[key] = alias
+        select_exprs[alias] = metric_sql_expr(metric, mode)
+    return select_exprs, metric_aliases
+
+
+def merge_component_lists(*groups: list[CompositeInput]) -> list[CompositeInput]:
+    """Deduplicate components by (metric, mode, basis), preserving first weight."""
+    out: list[CompositeInput] = []
+    seen: set[str] = set()
+    for group in groups:
+        for metric, mode, basis, weight in group:
+            key = _component_key(metric, mode, basis)
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append((metric, mode, basis, weight))
+    return out
+
+
 def _metric_select_exprs(
     criteria_metrics: list[tuple[str, MetricMode]],
     composite_components: list[CompositeInput],
@@ -230,17 +266,9 @@ def _metric_select_exprs(
         alias = f"_c{i}"
         select_exprs[alias] = metric_sql_expr(metric, mode)
 
-    comp_idx = 0
-    seen_keys: set[str] = set()
-    for metric, mode, basis, _w in composite_components:
-        key = _component_key(metric, mode, basis)
-        if key in seen_keys:
-            continue
-        seen_keys.add(key)
-        alias = f"_comp{comp_idx}"
-        comp_idx += 1
-        metric_aliases[key] = alias
-        select_exprs[alias] = metric_sql_expr(metric, mode)
+    comp_exprs, aliases = component_select_exprs(composite_components)
+    select_exprs.update(comp_exprs)
+    metric_aliases.update(aliases)
 
     if sort_by:
         select_exprs["_sort"] = metric_sql_expr(sort_by, sort_mode)

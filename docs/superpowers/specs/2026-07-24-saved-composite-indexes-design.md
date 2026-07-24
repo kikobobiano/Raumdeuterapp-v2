@@ -181,9 +181,12 @@ Regen shared-types after adding `composite_criteria`.
 - Showing composite score breakdown per component
 - Editing `/meta/metrics` catalog
 
-## 9. Phase 2 sketch (not implemented)
+## 9. Phase 2 (Scatter + Bar) — implemented
 
-Reuse the same store. Scatter/Bar POST bodies accept optional `composite`
-(or `x_composite` / `y_composite`) and compute the score per returned point
-with the same cohort z-score path (likely shared core helper). Metric Combobox
-merges `ci:*` the same way.
+Reuse the same Zustand store. Client resolves `ci:*` → components.
+
+- **Scatter:** `x_composite` / `y_composite` + optional `x_label` / `y_label` on
+  `ScatterRequest`. Scores via `score_candidates` after selecting component cols.
+- **Bar ranking:** parallel `composites: list[list[CompositeComponent]]` on
+  `BarRankingRequest` (same length as `metrics`). Mixed real + composite slots;
+  combined sort in Python when any slot is composite.

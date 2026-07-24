@@ -68,6 +68,63 @@ def test_scatter_smoke() -> None:
         assert isinstance(data["points"], list)
 
 
+def test_scatter_composite_axis_smoke() -> None:
+    with TestClient(app) as c:
+        seasons = c.get("/meta/seasons").json()
+        if not seasons:
+            return
+        season = seasons[0]
+        leagues = c.get(f"/meta/leagues?season={season}").json()
+        filters: dict = {"season": season, "minutes_min": 900}
+        if leagues:
+            filters["leagues"] = [leagues[0]]
+        body = {
+            "filters": filters,
+            "x_metric": "__ci_x__",
+            "y_metric": "xA",
+            "x_mode": "as_is",
+            "y_mode": "p90",
+            "x_composite": [
+                {"metric": "Goals", "mode": "p90", "basis": "value", "weight": 1.0},
+            ],
+            "x_label": "Goals index",
+        }
+        r = c.post("/scatter", json=body)
+        assert r.status_code == 200, r.text
+        data = r.json()
+        assert data["x_label"] == "Goals index"
+        assert "points" in data
+
+
+def test_bar_ranking_composite_smoke() -> None:
+    with TestClient(app) as c:
+        seasons = c.get("/meta/seasons").json()
+        if not seasons:
+            return
+        season = seasons[0]
+        leagues = c.get(f"/meta/leagues?season={season}").json()
+        filters: dict = {"season": season, "minutes_min": 900}
+        if leagues:
+            filters["leagues"] = [leagues[0]]
+        body = {
+            "filters": filters,
+            "metrics": ["__ci__", "xG"],
+            "modes": ["as_is", "p90"],
+            "composites": [
+                [{"metric": "Goals", "mode": "p90", "basis": "value", "weight": 1.0}],
+                [],
+            ],
+            "sort_combined": True,
+            "limit": 5,
+        }
+        r = c.post("/bar/ranking", json=body)
+        assert r.status_code == 200, r.text
+        data = r.json()
+        assert len(data["rows"]) <= 5
+        if data["rows"]:
+            assert "__ci__" in data["rows"][0]["values"]
+
+
 def test_progression_smoke() -> None:
     with TestClient(app) as c:
         seasons = c.get("/meta/seasons").json()

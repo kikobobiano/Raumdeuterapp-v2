@@ -70,6 +70,10 @@ class ScatterRequest(BaseModel):
     y_metric: str
     x_mode: MetricModeLiteral = "as_is"
     y_mode: MetricModeLiteral = "as_is"
+    x_composite: list[CompositeComponent] = Field(default_factory=list, max_length=8)
+    y_composite: list[CompositeComponent] = Field(default_factory=list, max_length=8)
+    x_label: str | None = None
+    y_label: str | None = None
     size_metric: str | None = None
     label_metric: str | None = None
     highlight_player_ids: list[int] = Field(default_factory=list)
@@ -482,6 +486,13 @@ class BarRankingRequest(BaseModel):
     filters: PlayerFilters
     metrics: list[str] = Field(..., min_length=1, max_length=3)
     modes: list[MetricModeLiteral] = Field(default_factory=list)
+    composites: list[list[CompositeComponent]] = Field(
+        default_factory=list,
+        description=(
+            "Optional parallel to metrics: non-empty list at index i means that slot "
+            "is a composite score (metrics[i] is only a response key / label id)."
+        ),
+    )
     sort_combined: bool = Field(
         True,
         description=(
@@ -498,6 +509,11 @@ class BarRankingRequest(BaseModel):
     def _bar_sort_by_when_single(self) -> BarRankingRequest:
         if not self.sort_combined and not (self.sort_by or "").strip():
             raise ValueError("sort_by is required when sort_combined is false")
+        if self.composites and len(self.composites) != len(self.metrics):
+            raise ValueError("composites length must match metrics length when provided")
+        for slot in self.composites:
+            if len(slot) > 8:
+                raise ValueError("each composite slot supports at most 8 components")
         return self
 
 

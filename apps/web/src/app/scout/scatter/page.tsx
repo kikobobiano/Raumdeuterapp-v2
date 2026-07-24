@@ -27,6 +27,12 @@ import { useDelayedLoading } from "@/hooks/use-delayed-loading";
 import { useFiltersSubtitle } from "@/hooks/use-filters-subtitle";
 import { useScoutFiltersSidebar } from "@/hooks/use-scout-filters-sidebar";
 import { api } from "@/lib/api";
+import {
+  compositeMetricId,
+  isCompositeMetricId,
+  parseCompositeMetricId,
+} from "@/lib/composite-indexes";
+import { useCompositeIndexes } from "@/lib/composite-indexes-store";
 import { rolesForApi } from "@/lib/role-filters";
 import { useGlobalFilters } from "@/lib/store";
 import { cn } from "@/lib/utils";
@@ -34,6 +40,7 @@ import { cn } from "@/lib/utils";
 export default function ScatterPage() {
   const f = useGlobalFilters();
   const { filtersOpen, setFiltersOpen } = useScoutFiltersSidebar();
+  const savedIndexes = useCompositeIndexes((s) => s.indexes);
   const [xMetric, setXMetric] = React.useState<string | null>(null);
   const [yMetric, setYMetric] = React.useState<string | null>(null);
   const [xMode, setXMode] = React.useState<MetricMode>("as_is");
@@ -57,12 +64,27 @@ export default function ScatterPage() {
     return Object.fromEntries(m.map((row) => [row.name, row]));
   }, [metricsQ.data]);
 
+  const savedById = React.useMemo(
+    () => new Map(savedIndexes.map((x) => [x.id, x])),
+    [savedIndexes],
+  );
+
+  const savedMetricOpts = React.useMemo(
+    () =>
+      savedIndexes.map((idx) => ({
+        value: compositeMetricId(idx.id),
+        label: `★ ${idx.name}`,
+      })),
+    [savedIndexes],
+  );
+
   const lastSeasonRef = React.useRef(f.season);
   React.useEffect(() => {
     const list = metricsQ.data ?? [];
     if (!list.length) return;
 
     const names = new Set(list.map((r) => r.name));
+    for (const opt of savedMetricOpts) names.add(opt.value);
     const seasonChanged = lastSeasonRef.current !== f.season;
     if (seasonChanged) lastSeasonRef.current = f.season;
 
@@ -80,15 +102,23 @@ export default function ScatterPage() {
     setYMetric(y.name);
     setXMode(modeFromMetricOption(x));
     setYMode(modeFromMetricOption(y));
-  }, [metricsQ.data, f.season, xMetric, yMetric]);
+  }, [metricsQ.data, f.season, xMetric, yMetric, savedMetricOpts]);
 
   const pickX = (name: string) => {
     setXMetric(name);
+    if (isCompositeMetricId(name)) {
+      setXMode("as_is");
+      return;
+    }
     setXMode(modeFromMetricOption(metricByName[name]));
   };
 
   const pickY = (name: string) => {
     setYMetric(name);
+    if (isCompositeMetricId(name)) {
+      setYMode("as_is");
+      return;
+    }
     setYMode(modeFromMetricOption(metricByName[name]));
   };
 
@@ -98,6 +128,12 @@ export default function ScatterPage() {
     () => rolesForApi({ selectedRoles: f.selectedRoles, roleSubTokens: f.roleSubTokens }),
     [f.selectedRoles, f.roleSubTokens],
   );
+
+  const resolveComposite = (metric: string | null) => {
+    const id = metric ? parseCompositeMetricId(metric) : null;
+    if (!id) return [];
+    return savedById.get(id)?.components ?? [];
+  };
 
   const scatterQ = useQuery({
     enabled: axesReady,
@@ -114,8 +150,17 @@ export default function ScatterPage() {
       yMetric,
       xMode,
       yMode,
+      savedIndexes,
     ],
     queryFn: async () => {
+      const xComposite = resolveComposite(xMetric);
+      const yComposite = resolveComposite(yMetric);
+      const xLabel = isCompositeMetricId(xMetric!)
+        ? savedById.get(parseCompositeMetricId(xMetric!)!)?.name
+        : undefined;
+      const yLabel = isCompositeMetricId(yMetric!)
+        ? savedById.get(parseCompositeMetricId(yMetric!)!)?.name
+        : undefined;
       const { data, error } = await api.POST("/scatter", {
         body: {
           filters: {
@@ -131,6 +176,10 @@ export default function ScatterPage() {
           y_metric: yMetric!,
           x_mode: xMode,
           y_mode: yMode,
+          x_composite: xComposite,
+          y_composite: yComposite,
+          x_label: xLabel ?? null,
+          y_label: yLabel ?? null,
         },
       });
       if (error) throw new Error(JSON.stringify(error));
@@ -168,10 +217,13 @@ export default function ScatterPage() {
     return highlightWyscoutIds.filter((id) => valid.has(id));
   }, [scatterQ.data?.points, highlightWyscoutIds]);
 
-  const metricOpts = (metricsQ.data ?? []).map((m) => ({ value: m.name, label: m.label }));
+  const metricOpts = [
+    ...savedMetricOpts,
+    ...(metricsQ.data ?? []).map((m) => ({ value: m.name, label: m.label })),
+  ];
 
-  const xMeta = xMetric ? metricByName[xMetric] : undefined;
-  const yMeta = yMetric ? metricByName[yMetric] : undefined;
+  const xMeta = xMetric && !isCompositeMetricId(xMetric) ? metricByName[xMetric] : undefined;
+  const yMeta = yMetric && !isCompositeMetricId(yMetric) ? metricByName[yMetric] : undefined;
 
   const subtitle = useFiltersSubtitle({
     prefix: scatterQ.data ? `${scatterQ.data.n} players` : null,
@@ -196,11 +248,13 @@ export default function ScatterPage() {
                   options={metricOpts}
                   className="min-w-0 flex-1"
                 />
-                <MetricModeToggle
-                  supports={!!xMeta?.supports_mode}
-                  value={xMode}
-                  onChange={setXMode}
-                />
+                {!isCompositeMetricId(xMetric ?? "") ? (
+                  <MetricModeToggle
+                    supports={!!xMeta?.supports_mode}
+                    value={xMode}
+                    onChange={setXMode}
+                  />
+                ) : null}
               </div>
             </div>
             <div>
@@ -212,11 +266,13 @@ export default function ScatterPage() {
                   options={metricOpts}
                   className="min-w-0 flex-1"
                 />
-                <MetricModeToggle
-                  supports={!!yMeta?.supports_mode}
-                  value={yMode}
-                  onChange={setYMode}
-                />
+                {!isCompositeMetricId(yMetric ?? "") ? (
+                  <MetricModeToggle
+                    supports={!!yMeta?.supports_mode}
+                    value={yMode}
+                    onChange={setYMode}
+                  />
+                ) : null}
               </div>
             </div>
           </div>

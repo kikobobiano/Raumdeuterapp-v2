@@ -26,6 +26,12 @@ import { useDelayedLoading } from "@/hooks/use-delayed-loading";
 import { useFiltersSubtitle } from "@/hooks/use-filters-subtitle";
 import { useScoutFiltersSidebar } from "@/hooks/use-scout-filters-sidebar";
 import { api } from "@/lib/api";
+import {
+  compositeMetricId,
+  isCompositeMetricId,
+  parseCompositeMetricId,
+} from "@/lib/composite-indexes";
+import { useCompositeIndexes } from "@/lib/composite-indexes-store";
 import { rolesForApi } from "@/lib/role-filters";
 import { useGlobalFilters } from "@/lib/store";
 import { cn } from "@/lib/utils";
@@ -44,6 +50,7 @@ const DEFAULT_METRICS: PickedMetric[] = [
 export default function BarPage() {
   const f = useGlobalFilters();
   const { filtersOpen, setFiltersOpen } = useScoutFiltersSidebar();
+  const savedIndexes = useCompositeIndexes((s) => s.indexes);
   const [picked, setPicked] = React.useState<PickedMetric[]>(DEFAULT_METRICS);
   const [sortDesc, setSortDesc] = React.useState(true);
   const [pickerValue, setPickerValue] = React.useState<string>("");
@@ -64,6 +71,20 @@ export default function BarPage() {
     return Object.fromEntries(m.map((row) => [row.name, row]));
   }, [metricsListQ.data]);
 
+  const savedById = React.useMemo(
+    () => new Map(savedIndexes.map((x) => [x.id, x])),
+    [savedIndexes],
+  );
+
+  const savedMetricOpts = React.useMemo(
+    () =>
+      savedIndexes.map((idx) => ({
+        value: compositeMetricId(idx.id),
+        label: `★ ${idx.name}`,
+      })),
+    [savedIndexes],
+  );
+
   const rolesPayload = React.useMemo(
     () => rolesForApi({ selectedRoles: f.selectedRoles, roleSubTokens: f.roleSubTokens }),
     [f.selectedRoles, f.roleSubTokens],
@@ -81,8 +102,14 @@ export default function BarPage() {
       f.minutesMin,
       picked,
       sortDesc,
+      savedIndexes,
     ],
     queryFn: async () => {
+      const composites = picked.map((p) => {
+        const id = parseCompositeMetricId(p.metric);
+        if (!id) return [];
+        return savedById.get(id)?.components ?? [];
+      });
       const { data, error } = await api.POST("/bar/ranking", {
         body: {
           filters: {
@@ -96,6 +123,7 @@ export default function BarPage() {
           },
           metrics: picked.map((p) => p.metric),
           modes: picked.map((p) => p.mode),
+          composites,
           sort_combined: true,
           sort_by: "",
           sort_mode: "as_is",
@@ -114,14 +142,21 @@ export default function BarPage() {
     { delay: 80 },
   );
 
-  const metricOpts = (metricsListQ.data ?? [])
-    .filter((m) => !picked.find((p) => p.metric === m.name))
-    .map((m) => ({ value: m.name, label: m.label }));
+  const metricOpts = [
+    ...savedMetricOpts.filter((o) => !picked.find((p) => p.metric === o.value)),
+    ...(metricsListQ.data ?? [])
+      .filter((m) => !picked.find((p) => p.metric === m.name))
+      .map((m) => ({ value: m.name, label: m.label })),
+  ];
 
   const addMetric = (name: string) => {
     if (!name || picked.find((p) => p.metric === name) || picked.length >= 3) return;
-    const meta = metricByName[name];
-    setPicked([...picked, { metric: name, mode: modeFromMetricOption(meta) }]);
+    if (isCompositeMetricId(name)) {
+      setPicked([...picked, { metric: name, mode: "as_is" }]);
+    } else {
+      const meta = metricByName[name];
+      setPicked([...picked, { metric: name, mode: modeFromMetricOption(meta) }]);
+    }
     setPickerValue("");
   };
 
@@ -131,6 +166,12 @@ export default function BarPage() {
 
   const updateMode = (i: number, mode: MetricMode) =>
     setPicked(picked.map((p, idx) => (idx === i ? { ...p, mode } : p)));
+
+  const labelFor = (metric: string) => {
+    const id = parseCompositeMetricId(metric);
+    if (id) return `★ ${savedById.get(id)?.name ?? metric}`;
+    return metricByName[metric]?.label ?? metric;
+  };
 
   const subtitle = useFiltersSubtitle({
     prefix: `Top 20 by combined normalized score (${picked.length} metric${
@@ -147,20 +188,22 @@ export default function BarPage() {
           <p className="label-caps mb-3">Metrics ({picked.length}/3)</p>
           <div className="space-y-2 mb-3">
             {picked.map((p, i) => {
-              const meta = metricByName[p.metric];
+              const meta = !isCompositeMetricId(p.metric) ? metricByName[p.metric] : undefined;
               return (
                 <div
                   key={p.metric}
                   className="flex items-center gap-2 rounded-md bg-surface-low p-2"
                 >
                   <span className="flex-1 truncate text-sm text-on-surface">
-                    {meta?.label ?? p.metric}
+                    {labelFor(p.metric)}
                   </span>
-                  <MetricModeToggle
-                    supports={!!meta?.supports_mode}
-                    value={p.mode}
-                    onChange={(m) => updateMode(i, m)}
-                  />
+                  {!isCompositeMetricId(p.metric) ? (
+                    <MetricModeToggle
+                      supports={!!meta?.supports_mode}
+                      value={p.mode}
+                      onChange={(m) => updateMode(i, m)}
+                    />
+                  ) : null}
                   <button
                     type="button"
                     onClick={() => removeMetric(p.metric)}
@@ -250,7 +293,9 @@ export default function BarPage() {
             <HorizontalBarRanking
               rows={barQ.data.rows}
               metrics={barQ.data.metrics}
-              labels={barQ.data.labels}
+              labels={Object.fromEntries(
+                picked.map((p) => [p.metric, labelFor(p.metric)]),
+              )}
               metricMaxAbs={barQ.data.metric_max_abs ?? null}
             />
           )

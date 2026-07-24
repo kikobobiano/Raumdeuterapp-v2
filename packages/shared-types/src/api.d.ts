@@ -679,6 +679,11 @@ export interface components {
             /** Modes */
             modes?: ("raw" | "p90" | "as_is")[];
             /**
+             * Composites
+             * @description Optional parallel to metrics: non-empty list at index i means that slot is a composite score (metrics[i] is only a response key / label id).
+             */
+            composites?: components["schemas"]["CompositeComponent"][][];
+            /**
              * Sort Combined
              * @description When true, order by sum of |m_i|/max_i over selected metrics in the filtered set (same scale as stacked bars). When false, use sort_by + sort_mode.
              * @default true
@@ -1746,6 +1751,14 @@ export interface components {
              * @enum {string}
              */
             y_mode: "raw" | "p90" | "as_is";
+            /** X Composite */
+            x_composite?: components["schemas"]["CompositeComponent"][];
+            /** Y Composite */
+            y_composite?: components["schemas"]["CompositeComponent"][];
+            /** X Label */
+            x_label?: string | null;
+            /** Y Label */
+            y_label?: string | null;
             /** Size Metric */
             size_metric?: string | null;
             /** Label Metric */
